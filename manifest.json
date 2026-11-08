@@ -1,5 +1,5 @@
 {
-  "package": "B-streamlit-public-demo-20261108.1",
+  "package": "B-streamlit-public-synthetic-loop",
   "files": [
     {
       "path": "core/__init__.py",
@@ -7,7 +7,7 @@
     },
     {
       "path": "core/api.py",
-      "sha256": "300e2cfaa8dee865c6ef1b5a888f491fe5d3a9efe8796986ea18e310259bdf2f"
+      "sha256": "85e87e2cf1d32b9761d4875bfa654aae14b90b54b89d4c667e74235a9135117d"
     },
     {
       "path": "core/rules.py",

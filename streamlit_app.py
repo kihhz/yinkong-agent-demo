@@ -7,7 +7,7 @@ import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
 from core import DemoService, HandoffError
-from model_demo import EXAMPLE, run_synthetic
+from model_demo import QUESTIONS as SYNTHETIC_QUESTIONS, run_synthetic
 
 
 CASES = {"hlj-production": "肇东农林植保", "hlj-transport": "呼玛短途运输"}
@@ -65,9 +65,8 @@ def render_sidebar(service):
         with st.expander("查看资料来源", expanded=True):
             for source in sources.values():
                 st.markdown(f"[{source['title']}]({source['url']})")
-        with st.expander("模型联调"):
-            render_model()
-    return state.chats[state.active_chat]
+        model_mode = st.toggle("模型联调")
+    return state.chats[state.active_chat], model_mode
 
 
 def resolve_question(prompt, case_id):
@@ -164,9 +163,8 @@ def model_throttle():
 
 
 def render_model():
-    st.subheader("大模型接入测试")
-    st.caption("只会发送页面下方的合成问题。模型回复独立展示。")
-    st.write(EXAMPLE)
+    st.subheader("大模型与工具联调")
+    st.caption("模型只收到选定的合成问题和对应的合成工具结果。真实案例问答在本地只读模式运行。")
     try:
         secret_values = st.secrets.to_dict()
     except StreamlitSecretNotFoundError:
@@ -176,21 +174,29 @@ def render_model():
     code = config["MODEL_DEMO_CODE"]
     if len(code) < 16 or not all(config[name] for name in names[:-1]):
         st.info("云端模型暂未启用。其他三个演示问题可直接体验。")
-        return
+        return None
     supplied = st.text_input("模型联调码", type="password", max_chars=128)
     if not hmac.compare_digest(code.encode("utf-8"), supplied.encode("utf-8")):
-        return
+        return None
+    index = st.radio("合成问题", range(len(SYNTHETIC_QUESTIONS)), format_func=SYNTHETIC_QUESTIONS.__getitem__)
     if st.button("运行一次模型联调", type="primary"):
         lock, deadline = model_throttle()
         with lock:
             now = monotonic()
             if now < deadline[0]:
                 st.warning("联调间隔为 30 秒，请稍后重试。")
-                return
+                return None
             deadline[0] = now + 30
-        with st.spinner("等待模型返回…"):
-            st.session_state["model_probe"] = run_synthetic(config)
-    result = st.session_state.get("model_probe")
+        with st.status("模型理解问题、调用只读工具并解释结果", expanded=True) as progress:
+            result = run_synthetic(config, index)
+            if result.get("tool"):
+                st.write(f"已执行合成只读工具 · {result['tool']}")
+            done = result["status"] == "CONNECTED"
+            progress.update(label="模型闭环完成" if done else "模型闭环未完成",
+                            state="complete" if done else "error")
+        st.session_state["model_probe"] = (index, result)
+    stored = st.session_state.get("model_probe")
+    result = stored[1] if stored and stored[0] == index else None
     if result:
         if result["status"] == "CONNECTED":
             st.success("模型已返回")
@@ -198,7 +204,9 @@ def render_model():
         else:
             http_code = result.get("http_code")
             status = result["status"]
-            st.warning(f"模型调用未完成 · {status}" + (f" · HTTP {http_code}" if http_code else ""))
+            stage = result.get("stage", "解释结果")
+            st.warning(f"模型调用未完成 · {stage} · {status}" + (f" · HTTP {http_code}" if http_code else ""))
+    return result
 
 
 def main():
@@ -209,10 +217,24 @@ def main():
     except HandoffError as exc:
         st.error(f"演示数据暂不可用 · {exc.code}")
         return
-    chat = render_sidebar(service)
+    chat, model_mode = render_sidebar(service)
     st.title("因空制宜 Agent")
     st.caption("黑龙江 2024 · 比赛演示 · 只读规则工具与冻结结果")
     center, right = st.columns([1.65, 1], gap="large")
+    if model_mode:
+        with center:
+            model_result = render_model()
+        with right, st.container(border=True):
+            st.subheader("合成联调成果")
+            if model_result and "observation" in model_result:
+                st.caption(f"本次执行 · {model_result['tool']}")
+                st.json(model_result["observation"], expanded=True)
+            if model_result and any(model_result.get("usage", [])):
+                st.caption("本次模型接口回传的 Token 用量，扣费以供应商账单为准。")
+                st.json(model_result["usage"], expanded=True)
+            if model_result is None:
+                st.info("运行联调后，这里会显示合成工具的返回。")
+        return
     with center:
         st.subheader("对话与处理进程")
         with st.expander("试试这三个示例", expanded=True):

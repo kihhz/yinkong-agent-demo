@@ -19,7 +19,7 @@ python -m streamlit run streamlit_app.py
 
 ## 模型联调
 
-页面默认可直接使用三个离线演示问题。需要验证模型时，由账号持有人在应用的 **Settings → Secrets** 填写配置，再使用页面上的「模型 · 合成例联调」。联调码至少 16 个字符，与模型 API Key 分开。下面用 DeepSeek 作配置示例：
+页面默认可直接使用三个只读演示问题。需要验证模型时，由账号持有人在应用的 **Settings → Secrets** 填写配置，再开启左栏「模型联调」并选一个合成问题。联调码至少 16 个字符，与模型 API Key 分开。下面用 DeepSeek 作配置示例：
 
 ```toml
 MODEL_BASE_URL = "https://api.deepseek.com"
@@ -28,6 +28,6 @@ MODEL_API_KEY = ""
 MODEL_DEMO_CODE = ""
 ```
 
-本版也接受 OpenAI `https://api.openai.com/v1` 和 Anthropic `https://api.anthropic.com`，模型名和凭证按各自账号填写。Secrets 的实际值只留在云端设置或本地忽略的 `.streamlit/secrets.toml`。仅在主动联调时请求模型，页面显示「模型已返回」才算真实连通。单实例限每 30 秒发起一次，模型输出不写磁盘。若使用计费密钥，请先在供应商账号设置额度。
+本版也接受 OpenAI `https://api.openai.com/v1` 和 Anthropic `https://api.anthropic.com`，模型名和凭证按各自账号填写。Secrets 的实际值只留在云端设置或本地忽略的 `.streamlit/secrets.toml`。每轮合成联调最多两次模型请求，分别理解问题和解释工具结果。页面显示「模型已返回」并列出已执行工具才算闭环成功。联调间隔至少 30 秒，模型输出不写磁盘。用量取自接口回传，扣费以供应商账单为准。
 
-模型只收到页面展示的固定合成例。案例检索、来源和历史结果都由本地规则工具返回。模型调用超时或失败时，离线案例继续可用。
+模型只收到固定合成问题及同一合成夹具的只读工具返回。真实对话文本、案例检索、来源及冻结状态留在应用进程内。模型超时、返回非法计划或解释校验失败时，真实案例仍可使用。

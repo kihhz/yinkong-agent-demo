@@ -17,6 +17,12 @@ def to_json(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2)
 
 
+def find_evidence(fragments, query, limit):
+    term = query.strip().casefold()
+    return [copy.deepcopy(f) for f in fragments if not term or term in to_json(f).casefold()][:limit]
+
+
+
 class DemoService:
     def __init__(self):
         self.root = Path(__file__).resolve().parents[1]
@@ -55,7 +61,7 @@ class DemoService:
         if not isinstance(query, str) or len(query) > 200 or type(limit) is not int or not 1 <= limit <= 20:
             raise HandoffError('INVALID_ARGUMENT', 'query最多200字符；limit为1至20整数')
         fragments = [f for f in self.evidence['fragments'] if f['id'] in case['evidence_ids']]
-        hits = [copy.deepcopy(f) for f in fragments if not query.strip() or query.strip().casefold() in to_json(f).casefold()][:limit]
+        hits = find_evidence(fragments, query, limit)
         source_ids = {f['source_id'] for f in hits}
         return {'mode': 'rule_retrieval', 'case_id': case_id, 'query': query,
                 'hits': hits, 'sources': copy.deepcopy([s for s in self.evidence['sources'] if s['id'] in source_ids]),
