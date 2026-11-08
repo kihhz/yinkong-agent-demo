@@ -1,16 +1,16 @@
 {
-  "package": "B-streamlit-public-synthetic-loop",
+  "package": "B-streamlit-public-demo-20261108.2",
   "files": [
     {
-      "path": "core/__init__.py",
+      "path": "demo_core_v2/__init__.py",
       "sha256": "1360161c6a884fdde0caa0b7d3cf5e73bbc48440699341b43942775e2bf94eb5"
     },
     {
-      "path": "core/api.py",
-      "sha256": "85e87e2cf1d32b9761d4875bfa654aae14b90b54b89d4c667e74235a9135117d"
+      "path": "demo_core_v2/api.py",
+      "sha256": "83df7cb0e28547b2b8bdec90fac78e9b4d215743dcaef6a6233ae3712c51e9a7"
     },
     {
-      "path": "core/rules.py",
+      "path": "demo_core_v2/rules.py",
       "sha256": "3e92cf120afbf425da3a99386fb47d8c23fd096d7ed379ae278627880d4d786c"
     },
     {
@@ -24,6 +24,10 @@
     {
       "path": "demo_data/evidence.json",
       "sha256": "15a4b8ca0ecd795a8aa1a35f6effd5f34546611806fa05610272b0ec77a50c12"
+    },
+    {
+      "path": "demo_data/verified_status.json",
+      "sha256": "393b0be68548467c44a37de7fa45623f1bd1f403841c067014f175c33625a31b"
     }
   ]
 }

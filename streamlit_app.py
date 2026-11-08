@@ -6,8 +6,8 @@ from time import monotonic
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
-from core import DemoService, HandoffError
-from model_demo import QUESTIONS as SYNTHETIC_QUESTIONS, run_synthetic
+from demo_core_v2 import DemoService, HandoffError
+from model_demo_v2 import QUESTIONS as SYNTHETIC_QUESTIONS, run_synthetic
 
 
 CASES = {"hlj-production": "肇东农林植保", "hlj-transport": "呼玛短途运输"}
@@ -93,10 +93,10 @@ def answer_question(service, chat, prompt):
         st.write(steps[0])
         try:
             if mode == "history":
-                history = service.call_tool("explain_evaluation", {"case_id": case_id})["result"]
-                steps.append("读取冻结历史结果 · explain_evaluation")
-                summary = "N、D、S、G、T 均为未计算。评估范围尚未签发，需求审核和合格承载数据也未齐。缺失值不能解释为零需求。"
-                result = {"title": "黑龙江历史评价状态", "summary": summary, "history": history}
+                history = service.call_tool("read_verified_result", {"case_id": case_id})
+                steps.append("读取 C v2 冻结状态 · read_verified_result")
+                summary = "N、D、S、G、T 均为空。N 缺评估范围签发，D 缺准入和已审核需求，S/G/T 缺合格承载数据发布。空值不能解释为零需求。"
+                result = {"title": "黑龙江冻结评价状态", "summary": summary, "history": history}
             else:
                 evidence = service.call_tool("evidence_query", {"case_id": case_id, "query": query})
                 steps.append(f"检索公开资料 · evidence_query · 命中 {len(evidence['hits'])} 条")
@@ -130,10 +130,15 @@ def render_results(result):
         if "history" in result:
             history = result["history"]
             metrics = {"N": history["N"], "D": history["D"], **history["metrics"]}
-            st.table([{"指标": label, "结果": "未计算" if value is None else str(value)}
+            reasons = {"N": "评估范围尚未签发", "D": "子集未准入，缺已审核任务",
+                       **dict.fromkeys(("S", "G", "T"), "合格承载数据发布未齐")}
+            st.table([{"指标": label, "结果": "未计算" if value is None else str(value), "原因": reasons[label]}
                       for label, value in metrics.items()])
-            st.caption(f"冻结历史快照 · {history['model_version']} · {history['data_version']}")
-            lines.extend(["", f"计算版本 {history['model_version']}，数据版本 {history['data_version']}。"])
+            versions = history["versions"]
+            version_line = f"{history['schema_version']} · {versions['legacy_model']} · {versions['legacy_data']}"
+            st.caption(f"C v2 冻结状态 · {history['snapshot_date']} · {version_line}")
+            lines.extend(["", f"冻结状态 {history['snapshot_date']} · {version_line}", "",
+                          *(f"- {label}：{reasons[label]}" for label in metrics)])
         else:
             analysis = result["analysis"]
             case = analysis["case"]
@@ -152,7 +157,7 @@ def render_results(result):
             lines.extend(["", "## 证据来源",
                           *(f"- [{item['title']}]({item['url']})" for item in evidence["sources"])])
         else:
-            st.caption("来源为已有 B 引擎历史快照的展示字段，页面执行只读查询。")
+            st.caption("来源为 C v2 随包的 B 本地运行状态摘要。网页读取冻结状态，当前未执行重算。")
     st.download_button("下载本次成果", "\n".join(lines) + "\n", "因空制宜_对话成果.md",
                        mime="text/markdown", width="stretch", on_click="ignore")
 

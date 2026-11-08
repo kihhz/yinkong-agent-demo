@@ -22,7 +22,6 @@ def find_evidence(fragments, query, limit):
     return [copy.deepcopy(f) for f in fragments if not term or term in to_json(f).casefold()][:limit]
 
 
-
 class DemoService:
     def __init__(self):
         self.root = Path(__file__).resolve().parents[1]
@@ -37,6 +36,7 @@ class DemoService:
             self.cases = self._load('cases.json')
             self.evidence = self._load('evidence.json')
             self.history = self._load('b_history.json')
+            self.verified_status = self._load('verified_status.json')
         except HandoffError:
             raise
         except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -95,10 +95,14 @@ class DemoService:
         self._case(case_id)
         raise HandoffError('B_ENGINE_NOT_BUNDLED', '本包只读历史状态，在线计算须B提供冻结引擎、输入与正式契约')
 
+    def read_verified_result(self, case_id):
+        self._case(case_id)
+        return copy.deepcopy(self.verified_status)
+
     def call_tool(self, name, arguments):
         methods = {'list_cases': self.list_cases, 'analyze_region': self.analyze_region,
                    'explain_evaluation': self.explain_evaluation, 'evidence_query': self.evidence_query,
-                   'evaluate_online': self.evaluate_online}
+                   'evaluate_online': self.evaluate_online, 'read_verified_result': self.read_verified_result}
         if not isinstance(name, str) or name not in methods:
             raise HandoffError('TOOL_NOT_ALLOWED', '未开放此工具')
         if not isinstance(arguments, dict):

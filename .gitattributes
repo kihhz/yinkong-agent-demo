@@ -1,2 +1,2 @@
-core/*.py -text
+demo_core_v2/*.py -text
 demo_data/*.json -text

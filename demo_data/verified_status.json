@@ -1,0 +1,30 @@
+{
+  "schema_version": "BC-subset-1.0-draft1",
+  "province": "黑龙江省",
+  "reference_year": 2024,
+  "N": null,
+  "D": null,
+  "metrics": {
+    "S": null,
+    "G": null,
+    "T": null
+  },
+  "null_reasons": {
+    "D": "SUBSET_NOT_ADMITTED",
+    "S": "CARRYING_RELEASE_INCOMPLETE",
+    "G": "CARRYING_RELEASE_INCOMPLETE",
+    "T": "CARRYING_RELEASE_INCOMPLETE"
+  },
+  "blockers": [
+    "CARRYING_RELEASE_INCOMPLETE",
+    "NO_APPROVED_TASKS",
+    "SUBSET_SCOPE_NOT_ISSUED"
+  ],
+  "is_formal": false,
+  "versions": {
+    "legacy_model": "B-v1.0-ref2024-air2025",
+    "legacy_data": "panel-339b0cc2d0bc"
+  },
+  "snapshot_date": "2026-11-08",
+  "mode": "frozen_status_view"
+}

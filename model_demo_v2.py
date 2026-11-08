@@ -5,7 +5,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-from core.api import find_evidence
+from demo_core_v2.api import find_evidence
 
 
 QUESTIONS = (
