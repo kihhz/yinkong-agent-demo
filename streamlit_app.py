@@ -11,12 +11,13 @@ from model_demo import EXAMPLE, run_synthetic
 
 
 CASES = {"hlj-production": "肇东农林植保", "hlj-transport": "呼玛短途运输"}
-QUESTIONS = [
+QUESTIONS = (
     "Q1 · 植保有何地区条件？能判断落地吗？",
     "Q2 · 历史指标为何为空？是不是零需求？",
     "Q3 · 呼玛航线依据在哪？计划年怎么填？",
-    "模型 · 合成例联调",
-]
+)
+PRODUCTION = "hlj-production"
+TRANSPORT = "hlj-transport"
 
 
 def render_evidence(result):
@@ -32,39 +33,129 @@ def render_evidence(result):
             st.markdown(f"[清单 PDF]({source['attachment_url']})")
 
 
-def render_case(service, case_id, query):
-    analysis = service.call_tool("analyze_region", {"case_id": case_id})
-    case = analysis["case"]
-    st.subheader(CASES[case_id])
-    years = st.columns(3)
-    years[0].metric("资料基准年", str(case["data_year"]))
-    years[1].metric("机场设施启用年", str(case["facility_start_year"]))
-    years[2].metric("任务计划年", str(case["planned_year"] or "未证实"))
-    if case_id == "hlj-transport":
-        st.info("清单列有推进固定航线的计划。机场 2024 年启用，航线的计划年和运行状态仍待核实。")
-    else:
-        st.info("公报数据和植保场景支持进一步核实需求。落地判断还需要作业记录、适用空域和运行许可。")
-    st.markdown("#### 待核建议")
-    st.write(analysis["suggestion"])
-    for item in analysis["verification_needed"]:
-        st.markdown(f"- {item}")
-    st.caption(case["coverage"])
-    st.markdown("#### 证据")
-    result = service.call_tool("evidence_query", {"case_id": case_id, "query": query})
-    render_evidence(result)
+def new_chat():
+    state = st.session_state
+    state.chat_counter += 1
+    state.active_chat = state.chat_counter
+    state.chats[state.active_chat] = {"messages": []}
+    if len(state.chats) > 8:
+        del state.chats[next(iter(state.chats))]
 
 
-def render_history(service):
-    view = service.call_tool("explain_evaluation", {"case_id": "hlj-production"})
-    history = view["result"]
-    st.subheader("黑龙江省历史计算状态")
-    st.caption("历史快照 · 两个案例共用 · 数据年 2024")
-    st.info("历史需求输入未完整审核，当前缺少样本范围签发与合格承载发布。空值表示指标尚无法给出，不能据此判断零需求。")
-    metrics = {"N": history["N"], "D": history["D"], **history["metrics"]}
-    for col, (label, value) in zip(st.columns(len(metrics)), metrics.items()):
-        col.metric(label, "未计算" if value is None else str(value))
-    st.write(f"计算版本 `{history['model_version']}` · 数据版本 `{history['data_version']}`")
-    st.caption("历史适飞变体用 2025 年度值作占位，场景适用空域仍缺证。")
+def render_sidebar(service):
+    state = st.session_state
+    if "chats" not in state:
+        state.chats = {}
+        state.chat_counter = 0
+        new_chat()
+    with st.sidebar:
+        st.subheader("因空制宜")
+        st.caption("低空智策 · Agent 工作台")
+        st.button("＋ 新建对话", on_click=new_chat, width="stretch")
+        labels = {cid: chat.get("title", f"新对话 {cid}") for cid, chat in state.chats.items()}
+        st.radio("对话", list(reversed(labels)), key="active_chat", format_func=labels.__getitem__)
+        st.divider()
+        st.subheader("资料库")
+        st.caption("黑龙江 2024 · 公开资料")
+        sources = {}
+        for case_id, label in CASES.items():
+            st.write(f"• {label}")
+            for source in service.evidence_query(case_id)["sources"]:
+                sources[source["id"]] = source
+        with st.expander("查看资料来源", expanded=True):
+            for source in sources.values():
+                st.markdown(f"[{source['title']}]({source['url']})")
+        with st.expander("模型联调"):
+            render_model()
+    return state.chats[state.active_chat]
+
+
+def resolve_question(prompt, case_id):
+    text = prompt.casefold()
+    if any(word in text for word in ("q2", "指标", "评分", "零需求", "空值", "d/s/g/t", "dsgt", "未计算")):
+        return "history", case_id or PRODUCTION, ""
+    if any(word in text for word in ("q3", "呼玛", "短途", "航线", "载人")):
+        return "case", TRANSPORT, "短途运输"
+    if any(word in text for word in ("q1", "植保", "肇东")):
+        return "case", PRODUCTION, ""
+    if case_id and any(word in text for word in ("依据", "来源", "补", "能否", "落地", "计划年")):
+        return "case", case_id, "短途运输" if case_id == TRANSPORT else ""
+    return None
+
+
+def answer_question(service, chat, prompt):
+    route = resolve_question(prompt, chat.get("case_id"))
+    if route is None:
+        return "目前可查询黑龙江的肇东植保、呼玛航线和历史评价状态。请点一个示例，或在提问里写明案例。", []
+
+    mode, case_id, query = route
+    steps = [f"识别问题 · {'历史评价状态' if mode == 'history' else CASES[case_id]}"]
+    with st.status("正在处理问题", expanded=True) as status:
+        st.write(steps[0])
+        try:
+            if mode == "history":
+                history = service.call_tool("explain_evaluation", {"case_id": case_id})["result"]
+                steps.append("读取冻结历史结果 · explain_evaluation")
+                summary = "N、D、S、G、T 均为未计算。评估范围尚未签发，需求审核和合格承载数据也未齐。缺失值不能解释为零需求。"
+                result = {"title": "黑龙江历史评价状态", "summary": summary, "history": history}
+            else:
+                evidence = service.call_tool("evidence_query", {"case_id": case_id, "query": query})
+                steps.append(f"检索公开资料 · evidence_query · 命中 {len(evidence['hits'])} 条")
+                st.write(steps[-1])
+                analysis = service.call_tool("analyze_region", {"case_id": case_id})
+                steps.append("生成核验建议 · analyze_region")
+                if case_id == TRANSPORT:
+                    summary = "清单记载呼玛通用机场于 2024 年启用，并列出推进固定短途航线的安排。航线计划年和运行状态仍待核实。"
+                else:
+                    summary = "黑龙江统计公报和肇东植保清单可用于核查需求。判断能否落地，还缺作业记录、适用空域和运行许可。"
+                result = {"title": CASES[case_id], "summary": summary, "analysis": analysis, "evidence": evidence}
+            st.write(steps[-1])
+        except HandoffError as exc:
+            status.update(label="处理未完成", state="error", expanded=False)
+            return f"资料暂不可用（{exc.code}）。", steps
+        chat.update(case_id=case_id, result=result)
+        status.update(label="处理完成", state="complete", expanded=False)
+    return summary, steps
+
+
+def render_results(result):
+    st.subheader("对话成果")
+    if result is None:
+        st.info("发出问题后，这里会显示结论、来源和待补资料。")
+        return
+    conclusion, sources = st.tabs(["结论", "证据来源"])
+    lines = [f"# {result['title']}", "", result["summary"]]
+    with conclusion:
+        st.markdown(f"**{result['title']}**")
+        st.write(result["summary"])
+        if "history" in result:
+            history = result["history"]
+            metrics = {"N": history["N"], "D": history["D"], **history["metrics"]}
+            st.table([{"指标": label, "结果": "未计算" if value is None else str(value)}
+                      for label, value in metrics.items()])
+            st.caption(f"冻结历史快照 · {history['model_version']} · {history['data_version']}")
+            lines.extend(["", f"计算版本 {history['model_version']}，数据版本 {history['data_version']}。"])
+        else:
+            analysis = result["analysis"]
+            case = analysis["case"]
+            year_line = f"资料年 {case['data_year']} · 设施启用年 {case['facility_start_year']} · 任务计划年 {case['planned_year'] or '未证实'}"
+            st.caption(year_line)
+            st.write(analysis["suggestion"])
+            st.markdown("**待补资料**")
+            for item in analysis["verification_needed"]:
+                st.markdown(f"- {item}")
+            lines.extend(["", year_line, "", analysis["suggestion"], "",
+                          *(f"- {item}" for item in analysis["verification_needed"])])
+    with sources:
+        if "evidence" in result:
+            evidence = result["evidence"]
+            render_evidence(evidence)
+            lines.extend(["", "## 证据来源",
+                          *(f"- [{item['title']}]({item['url']})" for item in evidence["sources"])])
+        else:
+            st.caption("来源为已有 B 引擎历史快照的展示字段，页面执行只读查询。")
+    st.download_button("下载本次成果", "\n".join(lines) + "\n", "因空制宜_对话成果.md",
+                       mime="text/markdown", width="stretch", on_click="ignore")
 
 
 @st.cache_resource
@@ -110,22 +201,54 @@ def render_model():
             st.warning(f"模型调用未完成 · {status}" + (f" · HTTP {http_code}" if http_code else ""))
 
 
-st.set_page_config(page_title="因空制宜 Agent", page_icon="🛩️", layout="centered")
-st.title("因空制宜 Agent")
-st.caption("黑龙江 2024 · 规则分析 / 资料检索 / 历史状态")
-st.warning("比赛演示快照。在线正式评分暂未开放，场景分析供核查资料与准备评估。")
-question = st.radio("选择一个示例", QUESTIONS)
-if question == QUESTIONS[3]:
-    render_model()
-else:
+def main():
+    st.set_page_config(page_title="因空制宜 Agent", page_icon="🛩️", layout="wide",
+                       initial_sidebar_state="expanded")
     try:
         service = DemoService()
-        if question == QUESTIONS[0]:
-            render_case(service, "hlj-production", "")
-        elif question == QUESTIONS[1]:
-            render_history(service)
-        else:
-            query = st.text_input("本地证据关键词", value="短途运输", max_chars=200)
-            render_case(service, "hlj-transport", query)
     except HandoffError as exc:
         st.error(f"演示数据暂不可用 · {exc.code}")
+        return
+    chat = render_sidebar(service)
+    st.title("因空制宜 Agent")
+    st.caption("黑龙江 2024 · 比赛演示 · 只读规则工具与冻结结果")
+    center, right = st.columns([1.65, 1], gap="large")
+    with center:
+        st.subheader("对话与处理进程")
+        with st.expander("试试这三个示例", expanded=True):
+            choices = [st.button(q, key=f"example-{index}", width="stretch")
+                       for index, q in enumerate(QUESTIONS)]
+            example = next((q for q, clicked in zip(QUESTIONS, choices) if clicked), None)
+        history = st.container()
+        with history:
+            if not chat["messages"]:
+                st.caption("可以点击示例，也可以在下方提问。")
+            for entry in chat["messages"]:
+                with st.chat_message("user"):
+                    st.text(entry["prompt"])
+                with st.chat_message("assistant"):
+                    st.write(entry["answer"])
+                    if entry["steps"]:
+                        with st.expander("处理进程"):
+                            for step in entry["steps"]:
+                                st.write(step)
+        typed = st.chat_input("例如：呼玛航线计划年有证据吗？", max_chars=300,
+                              key=f"composer-{st.session_state.active_chat}")
+        prompt = (example or typed or "").strip()
+        if prompt:
+            with history:
+                with st.chat_message("user"):
+                    st.text(prompt)
+                with st.chat_message("assistant"):
+                    answer, steps = answer_question(service, chat, prompt)
+                    st.write(answer)
+            chat.setdefault("title", prompt[:18] + ("…" if len(prompt) > 18 else ""))
+            chat["messages"].append({"prompt": prompt, "answer": answer, "steps": steps})
+            chat["messages"] = chat["messages"][-16:]
+    with right:
+        with st.container(border=True):
+            render_results(chat.get("result"))
+
+
+if __name__ == "__main__":
+    main()
