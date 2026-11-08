@@ -1,0 +1,29 @@
+{
+  "package": "B-streamlit-public-demo-20261108.1",
+  "files": [
+    {
+      "path": "core/__init__.py",
+      "sha256": "1360161c6a884fdde0caa0b7d3cf5e73bbc48440699341b43942775e2bf94eb5"
+    },
+    {
+      "path": "core/api.py",
+      "sha256": "300e2cfaa8dee865c6ef1b5a888f491fe5d3a9efe8796986ea18e310259bdf2f"
+    },
+    {
+      "path": "core/rules.py",
+      "sha256": "3e92cf120afbf425da3a99386fb47d8c23fd096d7ed379ae278627880d4d786c"
+    },
+    {
+      "path": "demo_data/b_history.json",
+      "sha256": "69c402e93641c308e8afce709f38639e393ce28d9b121b400df2f6966616b7fe"
+    },
+    {
+      "path": "demo_data/cases.json",
+      "sha256": "c4601a48e7b0cb058310f02deb23e9ace675ec59c3b57fd9191ae7d8c10488d0"
+    },
+    {
+      "path": "demo_data/evidence.json",
+      "sha256": "15a4b8ca0ecd795a8aa1a35f6effd5f34546611806fa05610272b0ec77a50c12"
+    }
+  ]
+}

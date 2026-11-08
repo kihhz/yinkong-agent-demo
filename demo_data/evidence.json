@@ -1,0 +1,85 @@
+{
+  "sources": [
+    {
+      "id": "list-fab469e0b349",
+      "title": "2024 年黑龙江省低空经济发展重点项目和应用场景清单",
+      "url": "https://drc.hlj.gov.cn/drc/c111428/202409/c00_31773334.shtml",
+      "year": 2024,
+      "published_at": null,
+      "attachment_url": "https://drc.hlj.gov.cn/drc/c111428/202409/31773334/files/%E3%80%90%E9%99%84%E4%BB%B62%E3%80%912024%E5%B9%B4%E9%BB%91%E9%BE%99%E6%B1%9F%E7%9C%81%E4%BD%8E%E7%A9%BA%E7%BB%8F%E6%B5%8E%E5%8F%91%E5%B1%95%E9%87%8D%E7%82%B9%E9%A1%B9%E7%9B%AE%E5%92%8C%E5%BA%94%E7%94%A8%E5%9C%BA%E6%99%AF%E6%B8%85%E5%8D%95.pdf"
+    },
+    {
+      "id": "regional-stats",
+      "title": "2024年黑龙江省国民经济和社会发展统计公报",
+      "url": "https://www.hlj.gov.cn/hlj/c108419/202504/c00_31866784.shtml",
+      "year": 2024,
+      "published_at": "2025-08-20（网页显示日期）"
+    },
+    {
+      "id": "national-plan",
+      "title": "通用航空装备创新应用实施方案（2024—2030年）",
+      "url": "https://www.miit.gov.cn/jgsj/zbes/wjfb/art/2024/art_eea7f1d8dd25444bb370faaaf26637d6.html",
+      "year": 2024,
+      "published_at": "2024-03-27"
+    }
+  ],
+  "fragments": [
+    {
+      "id": "HLJ02",
+      "quote": "清单记载，肇东北大荒通用机场于 2016 年投入使用，农林航空植保是其主要业务。该资料未单独给出所选植保任务的开始年。",
+      "source_id": "list-fab469e0b349",
+      "page": 1,
+      "locator": "section:p1:line10",
+      "year": 2024,
+      "kind": "public_task_excerpt"
+    },
+    {
+      "id": "HLJ04",
+      "quote": "清单记载，呼玛通用机场于 2024 年投入使用，并列出推进固定短途运输航线的安排。所选航线的具体计划年和运行状态仍待核。",
+      "source_id": "list-fab469e0b349",
+      "page": 2,
+      "locator": "section:p2:line22",
+      "year": 2024,
+      "kind": "public_task_excerpt"
+    },
+    {
+      "id": "STAT1",
+      "kind": "public_statistics",
+      "dimension": "经济",
+      "quote": "2024 年黑龙江省地区生产总值为 16476.9 亿元。",
+      "source_id": "regional-stats",
+      "locator": "2024年统计公报/综合或农业",
+      "year": 2024,
+      "region": "黑龙江省"
+    },
+    {
+      "id": "STAT2",
+      "kind": "public_statistics",
+      "dimension": "农业产业",
+      "quote": "2024 年黑龙江省粮食产量为 8001.7 万吨。",
+      "source_id": "regional-stats",
+      "locator": "2024年统计公报/综合或农业",
+      "year": 2024,
+      "region": "黑龙江省"
+    },
+    {
+      "id": "STAT3",
+      "kind": "public_statistics",
+      "dimension": "农业空间",
+      "quote": "2024 年黑龙江省粮食播种面积为 1475.4 万公顷。",
+      "source_id": "regional-stats",
+      "locator": "2024年统计公报/综合或农业",
+      "year": 2024,
+      "region": "黑龙江省"
+    },
+    {
+      "id": "NATIONAL-PRODUCTION",
+      "source_id": "national-plan",
+      "page": 6,
+      "locator": "第6页/第12项",
+      "year": 2024,
+      "kind": "policy_direction",
+      "quote": "方案鼓励在黑龙江等重点地区开展农林植保和短途运输等通用航空示范。具体任务仍需核查运行条件及许可。"
+    }
+  ]
+}

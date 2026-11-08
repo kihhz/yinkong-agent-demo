@@ -1,0 +1,2 @@
+core/*.py -text
+demo_data/*.json -text

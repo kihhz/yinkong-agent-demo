@@ -1,0 +1,18 @@
+{
+  "model_version": "B-v1.0-ref2024-air2025",
+  "data_version": "panel-339b0cc2d0bc",
+  "province": "黑龙江省",
+  "reference_year": 2024,
+  "variant": "primary_air2025",
+  "air_target_year": 2025,
+  "data_status": "demand_incomplete",
+  "D": null,
+  "N": null,
+  "metrics": {
+    "S": null,
+    "G": null,
+    "T": null
+  },
+  "mode": "historical_projection",
+  "projection": true
+}

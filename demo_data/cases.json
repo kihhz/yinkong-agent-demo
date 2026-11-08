@@ -1,0 +1,67 @@
+[
+  {
+    "id": "hlj-production",
+    "region": "黑龙江省",
+    "scene": "production",
+    "data_year": 2024,
+    "list_year": 2024,
+    "task_id": "HLJ02-植保",
+    "written_status": "T1",
+    "task_start_year": null,
+    "planned_year": null,
+    "facility_start_year": 2016,
+    "evidence_ids": [
+      "HLJ02",
+      "STAT1",
+      "STAT2",
+      "STAT3",
+      "NATIONAL-PRODUCTION"
+    ],
+    "A_review": "本案例缺少已签发的评估范围。",
+    "scope_signed": false,
+    "coverage": "仅2024清单内所选任务，不代表全省需求或实施情况",
+    "airspace": {
+      "year": null,
+      "ratio": null,
+      "status": "未取得场景匹配、机型/高度与分母可核查的适用空域证据"
+    },
+    "missing": [
+      "任务运行或作业记录",
+      "已签发的评估范围",
+      "适用空域与运行许可",
+      "经核验的承载数据"
+    ]
+  },
+  {
+    "id": "hlj-transport",
+    "region": "黑龙江省",
+    "scene": "transport",
+    "data_year": 2024,
+    "list_year": 2024,
+    "task_id": "HLJ04-航线",
+    "written_status": "planned",
+    "task_start_year": null,
+    "planned_year": null,
+    "facility_start_year": 2024,
+    "evidence_ids": [
+      "HLJ04",
+      "STAT1",
+      "STAT2",
+      "STAT3"
+    ],
+    "A_review": "本案例缺少已签发的评估范围。",
+    "scope_signed": false,
+    "coverage": "仅2024清单内所选任务，不代表全省需求或实施情况",
+    "airspace": {
+      "year": null,
+      "ratio": null,
+      "status": "未取得场景匹配、机型/高度与分母可核查的适用空域证据"
+    },
+    "missing": [
+      "任务运行或作业记录",
+      "已签发的评估范围",
+      "适用空域与运行许可",
+      "经核验的承载数据"
+    ]
+  }
+]
