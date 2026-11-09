@@ -1,9 +1,8 @@
-"""External inference and read-only tool routing for approved synthetic questions."""
+"""Huawei Cloud MaaS inference and read-only tool routing."""
 
 import json
 import re
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from demo_core_v2.api import find_evidence
@@ -31,20 +30,8 @@ EXPLAIN_SYSTEM = (
     '{"conclusion":"INSUFFICIENT","explanation":"现有资料不足以得出正式结论。"}。'
     '只写给定事实和缺项，最多两句，不编数字、日期或审批。'
 )
-ENDPOINTS = {
-    "https://api.openai.com/v1": ("openai", "/chat/completions"),
-    "https://api.deepseek.com": ("openai", "/chat/completions"),
-    "https://api.deepseek.com/v1": ("openai", "/chat/completions"),
-    "https://api.modelarts-maas.com/v2": ("maas", "/chat/completions"),
-    "https://api.anthropic.com": ("anthropic", "/v1/messages"),
-    "https://api.anthropic.com/v1": ("anthropic", "/messages"),
-}
+MAAS_BASE_URL = "https://api.modelarts-maas.com/v2"
 MAX_BODY = 256_000
-CHAT_ENDPOINTS = {
-    "https://api.deepseek.com",
-    "https://api.deepseek.com/v1",
-    "https://api.modelarts-maas.com/v2",
-}
 CHAT_CASES = {"hlj-production", "hlj-transport"}
 CHAT_TOOLS = {"analyze_region", "evidence_query", "read_verified_result"}
 CHAT_SYSTEM = (
@@ -68,33 +55,24 @@ def _request_model(environ, system, text, max_tokens=256):
     model = environ.get("MODEL_NAME", "").strip()
     if not (base and key and model):
         return {"status": "NOT_CONFIGURED"}
-    if base not in ENDPOINTS:
+    if base != MAAS_BASE_URL:
         return {"status": "ENDPOINT_NOT_ALLOWED"}
-    protocol, route = ENDPOINTS[base]
-    body = {"model": model, "max_tokens": max_tokens, "messages": [{"role": "user", "content": text}]}
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    if protocol == "anthropic":
-        body["system"] = system
-        headers.update({"x-api-key": key, "anthropic-version": "2023-06-01"})
-    else:
-        body["messages"].insert(0, {"role": "system", "content": system})
-        if protocol == "openai":
-            body["response_format"] = {"type": "json_object"}
-        headers["Authorization"] = f"Bearer {key}"
-        if protocol == "maas" or urlsplit(base).hostname == "api.deepseek.com":
-            body["thinking"] = {"type": "disabled"}
+    body = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}],
+        "thinking": {"type": "disabled"},
+    }
+    headers = {"Content-Type": "application/json", "Accept": "application/json", "Authorization": f"Bearer {key}"}
     try:
-        request = Request(base + route, json.dumps(body).encode("utf-8"), headers)
+        request = Request(MAAS_BASE_URL + "/chat/completions", json.dumps(body).encode("utf-8"), headers)
         opener = build_opener(ProxyHandler({}), NoRedirect())
         with opener.open(request, timeout=20) as response:
             raw = response.read(MAX_BODY + 1)
         if len(raw) > MAX_BODY:
             return {"status": "RESPONSE_TOO_LARGE"}
         result = json.loads(raw)
-        if protocol == "anthropic":
-            answer = "".join(block["text"] for block in result["content"] if block["type"] == "text")
-        else:
-            answer = result["choices"][0]["message"]["content"]
+        answer = result["choices"][0]["message"]["content"]
         if not isinstance(answer, str) or not answer.strip():
             return {"status": "EMPTY_RESPONSE"}
         usage = result.get("usage", {})
@@ -141,7 +119,7 @@ def draft_method(environ, topic):
 
 def plan_chat(environ, prompt, active_case=None):
     """Route one user-consented message; source materials never enter this request."""
-    if environ.get("MODEL_BASE_URL", "").strip().rstrip("/") not in CHAT_ENDPOINTS:
+    if environ.get("MODEL_BASE_URL", "").strip().rstrip("/") != MAAS_BASE_URL:
         return {"status": "ENDPOINT_NOT_ALLOWED"}
     if not isinstance(prompt, str) or not 0 < len(prompt.strip()) <= 300:
         return {"status": "MESSAGE_NOT_ALLOWED"}

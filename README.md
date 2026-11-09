@@ -23,28 +23,15 @@ python -m streamlit run streamlit_app.py
 
 评委直接使用中间聊天框，无需联调码。案例问答按现有证据解释结论，可接着问年份、依据和待补材料。勾选允许模型后，案例问答可把本条输入和当前案例标识发给模型来识别意图。询问「低空物流试点怎么设计」等通用方法时，只将预设的主题词发给模型来生成建议。资料与工具结果留在应用内。公开聊天的外部请求限每个浏览器会话 12 次、每个服务实例每小时 60 次，超限后可继续使用资料库。
 
-### 联网查公开资料
-
-在 Streamlit 的 **Settings → Secrets** 添加 `DEEPSEEK_SEARCH_API_KEY = "你的 DeepSeek 官方平台 API Key"`，与华为云 MaaS 模型密钥分开。保存后，普通聊天区会出现「下一条消息联网查官方网页」。勾选后可试「浙江低空物流政策有哪些？」。
-
-本功能只发送从问题里提取的省份、年份和预设主题词，返回的链接限定为 HTTPS 的 `gov.cn` 子域名。右栏的摘要来自搜索服务，正式引用前请打开原文。联网搜索与普通对话中的模型调用共用上述外部请求限额，搜索供应商按成功请求计费。
-
-页面默认可直接使用只读演示问题。需要验证模型时，由账号持有人在应用的 **Settings → Secrets** 填写配置，再开启左栏「模型联调」并选一个合成问题。联调码至少 16 个字符，与模型 API Key 分开。下面用 DeepSeek 作配置示例：
-
-```toml
-MODEL_BASE_URL = "https://api.deepseek.com"
-MODEL_NAME = "deepseek-flash"
-MODEL_API_KEY = ""
-MODEL_DEMO_CODE = ""
-```
-
-如果使用华为云 MaaS 上已开通的 DeepSeek-V4.1-Flash-1017，改用以下地址和模型，并填该平台生成的 MaaS API Key。
+模型调用仅使用华为云 MaaS。需要验证模型时，由账号持有人在 Streamlit 的 **Settings → Secrets** 填写华为云 MaaS 配置，再开启左栏「模型联调」并选一个合成问题。联调码至少 16 个字符，与 MaaS API Key 分开。
 
 ```toml
 MODEL_BASE_URL = "https://api.modelarts-maas.com/v2"
 MODEL_NAME = "deepseek-v4.1-flash-1017"
+MODEL_API_KEY = ""
+MODEL_DEMO_CODE = ""
 ```
 
-本版也接受 OpenAI `https://api.openai.com/v1` 和 Anthropic `https://api.anthropic.com`，模型名和凭证按各自账号填写。Secrets 的实际值只留在云端设置或本地忽略的 `.streamlit/secrets.toml`。每轮合成联调最多两次模型请求，分别理解问题和解释工具结果。页面显示「模型已返回」并列出已执行工具才算闭环成功。联调间隔至少 30 秒，模型输出不写磁盘。用量取自接口回传，扣费以供应商账单为准。
+Secrets 的实际值只留在云端设置或本地忽略的 `.streamlit/secrets.toml`。每轮合成联调最多两次模型请求，分别理解问题和解释工具结果。页面显示「模型已返回」并列出已执行工具才算闭环成功。联调间隔至少 30 秒，模型输出不写磁盘。用量取自接口回传，扣费以华为云账单为准。
 
-模型只收到固定合成问题及同一合成夹具的只读工具返回。真实对话文本、案例检索、来源及冻结状态留在应用进程内。模型超时、返回非法计划或解释校验失败时，真实案例仍可使用。
+联调模式只向模型发送固定合成问题和合成工具结果。普通聊天的案例原文、检索证据和冻结结果留在应用进程内。模型不可用时仍可查询资料库。
