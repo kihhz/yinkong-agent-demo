@@ -89,7 +89,7 @@ def lookup_region(prompt, previous=None):
     if not names or names == ("黑龙江",):
         if any(word in prompt for word in HLJ_CASE):
             return None
-    if names == ("黑龙江",) and any(word in prompt for word in ("植保", "航线", "短途", "评价指标")):
+    if names == ("黑龙江",) and any(word in prompt for word in ("植保", "航线", "短途", "计划年", "评价指标", "评分")):
         return None
     stats_requested = any(word in prompt for word in STATS_TERMS)
     low_altitude = any(word in prompt for word in LOW_ALTITUDE)
@@ -121,6 +121,8 @@ def lookup_region(prompt, previous=None):
             population_gap = abs(REGIONS[first][0] - REGIONS[second][0])
             urban_gap = abs(REGIONS[first][1] - REGIONS[second][1])
             paragraphs.append(f"两地人口相差 {population_gap:,} 万人，城镇人口比重相差 {urban_gap:.2f} 个百分点。")
+            if not low_altitude:
+                paragraphs.append("这两项可以用来对比地区人口规模和城乡结构。若要用来选低空物流试点，还需要具体线路的订单密度、地面运时和运营条件。")
     if low_altitude:
         paragraphs.extend(f"{item['region']}（{item['year']} 年）。{item['summary']}" for item in sources)
         missing = [name for name in names if name not in POLICIES]

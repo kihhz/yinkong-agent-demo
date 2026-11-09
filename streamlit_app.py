@@ -7,8 +7,9 @@ from time import monotonic
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
+from case_chat import HISTORY_REASONS, case_reply, case_topic, history_reply, method_reply, method_topic
 from demo_core_v2 import DemoService, HandoffError
-from model_demo_v4 import CHAT_ENDPOINTS, QUESTIONS as SYNTHETIC_QUESTIONS, plan_chat, run_synthetic
+from model_demo_v4 import CHAT_ENDPOINTS, QUESTIONS as SYNTHETIC_QUESTIONS, draft_method, plan_chat, run_synthetic
 from public_search import public_keywords, search_public_pages
 from region_evidence_v1 import POLICIES, REGIONS, STATS_TITLE, STATS_URL, lookup_region
 
@@ -81,11 +82,11 @@ def resolve_question(prompt, case_id):
     text = prompt.casefold()
     if any(word in text for word in ("q2", "指标", "评分", "零需求", "空值", "d/s/g/t", "dsgt", "未计算")):
         return "history", case_id or PRODUCTION, ""
-    if any(word in text for word in ("q3", "呼玛", "短途", "航线", "载人")):
+    if any(word in text for word in ("q3", "呼玛", "短途", "载人")) or (not case_id and "航线" in text):
         return "case", TRANSPORT, "短途运输"
     if any(word in text for word in ("q1", "植保", "肇东")):
         return "case", PRODUCTION, ""
-    if case_id and any(word in text for word in ("依据", "来源", "补", "能否", "落地", "计划年")):
+    if case_id and case_topic(text):
         return "case", case_id, "短途运输" if case_id == TRANSPORT else ""
     return None
 
@@ -122,6 +123,20 @@ def answer_public_search(chat, prompt, api_key):
 def answer_question(service, chat, prompt, model_config=None, search_key=""):
     if search_key:
         return answer_public_search(chat, prompt, search_key)
+    topic = method_topic(prompt)
+    if topic:
+        model_steps = None
+        steps = [f"识别为通用方法问题 · {topic}"]
+        if model_config and reserve_judge_request():
+            with st.spinner("DeepSeek 正在整理试点方案…"):
+                model_steps = draft_method(model_config, topic)
+        origin = "DeepSeek 通用建议" if model_steps else "本地方法指引"
+        steps.append(origin)
+        answer = method_reply(topic, model_steps)
+        chat.pop("case_id", None)
+        chat["result"] = {"title": origin, "summary": answer, "method_guidance": True}
+        return answer, steps
+
     previous = chat.get("result")
     regional = lookup_region(prompt, previous if previous and "facts" in previous else None)
     if regional:
@@ -152,8 +167,7 @@ def answer_question(service, chat, prompt, model_config=None, search_key=""):
                 route = (mode, case_id, "短途运输" if case_id == TRANSPORT else "")
                 steps.append(f"DeepSeek 已识别意图 · {plan['tool']}")
             elif status == "OUT_OF_SCOPE":
-                route = None
-                steps.append("DeepSeek 已识别意图 · 超出当前资料范围")
+                steps.append("DeepSeek 未匹配工具 · 继续检查资料库")
             else:
                 http_code = model_result.get("http_code")
                 detail = f"HTTP {http_code}" if http_code else status
@@ -176,6 +190,7 @@ def answer_question(service, chat, prompt, model_config=None, search_key=""):
                 history = service.call_tool("read_verified_result", {"case_id": case_id})
                 steps.append("读取 C v2 冻结状态 · read_verified_result")
                 summary = "N、D、S、G、T 均为空。N 缺评估范围签发，D 缺准入和已审核需求，S/G/T 缺合格承载数据发布。空值不能解释为零需求。"
+                answer = history_reply()
                 result = {"title": "黑龙江冻结评价状态", "summary": summary, "history": history}
             else:
                 evidence = service.call_tool("evidence_query", {"case_id": case_id, "query": query})
@@ -183,10 +198,7 @@ def answer_question(service, chat, prompt, model_config=None, search_key=""):
                 st.write(steps[-1])
                 analysis = service.call_tool("analyze_region", {"case_id": case_id})
                 steps.append("生成核验建议 · analyze_region")
-                if case_id == TRANSPORT:
-                    summary = "清单记载呼玛通用机场于 2024 年启用，并列出推进固定短途航线的安排。航线计划年和运行状态仍待核实。"
-                else:
-                    summary = "黑龙江统计公报和肇东植保清单可用于核查需求。判断能否落地，还缺作业记录、适用空域和运行许可。"
+                summary, answer = case_reply(prompt, analysis, evidence)
                 result = {"title": CASES[case_id], "summary": summary, "analysis": analysis, "evidence": evidence}
             st.write(steps[-1])
         except HandoffError as exc:
@@ -194,10 +206,7 @@ def answer_question(service, chat, prompt, model_config=None, search_key=""):
             return f"资料暂不可用（{exc.code}）。", steps
         chat.update(case_id=case_id, result=result)
         status.update(label="处理完成", state="complete", expanded=False)
-    if mode == "evidence" and evidence["hits"]:
-        first = evidence["hits"][0]
-        return f"{first['quote']}\n\n定位 {first['locator']}，原文链接见右栏「证据来源」。", steps
-    return summary, steps
+    return answer, steps
 
 
 def render_results(result):
@@ -213,15 +222,15 @@ def render_results(result):
         if "history" in result:
             history = result["history"]
             metrics = {"N": history["N"], "D": history["D"], **history["metrics"]}
-            reasons = {"N": "评估范围尚未签发", "D": "子集未准入，缺已审核任务",
-                       **dict.fromkeys(("S", "G", "T"), "合格承载数据发布未齐")}
-            st.table([{"指标": label, "结果": "未计算" if value is None else str(value), "原因": reasons[label]}
+            st.table([{"指标": label, "结果": "未计算" if value is None else str(value), "原因": HISTORY_REASONS[label]}
                       for label, value in metrics.items()])
             versions = history["versions"]
             version_line = f"{history['schema_version']} · {versions['legacy_model']} · {versions['legacy_data']}"
             st.caption(f"C v2 冻结状态 · {history['snapshot_date']} · {version_line}")
             lines.extend(["", f"冻结状态 {history['snapshot_date']} · {version_line}", "",
-                          *(f"- {label}：{reasons[label]}" for label in metrics)])
+                          *(f"- {label}：{HISTORY_REASONS[label]}" for label in metrics)])
+        elif "method_guidance" in result:
+            st.caption("本次给出的是试点方法。")
         elif "web_sources" in result:
             st.caption("网页搜索只提供资料线索。")
         elif "facts" in result:
@@ -247,6 +256,8 @@ def render_results(result):
             render_evidence(evidence)
             lines.extend(["", "## 证据来源",
                           *(f"- [{item['title']}]({item['url']})" for item in evidence["sources"])])
+        elif "method_guidance" in result:
+            st.caption("本次未检索项目资料。可以补充地区再查具体证据。")
         elif "web_sources" in result:
             for index, item in enumerate(result["web_sources"], start=1):
                 st.text(item["title"])
@@ -405,9 +416,9 @@ def main():
         search_key = config[SEARCH_KEY_NAME]
         if chat_enabled:
             provider = "华为云 MaaS" if endpoint == "https://api.modelarts-maas.com/v2" else "DeepSeek"
-            st.checkbox(f"同意将下一条消息发送给{provider}，仅用于理解问题",
+            st.checkbox(f"允许下一条消息使用{provider}模型",
                         key=f"judge-consent-{chat_id}")
-            st.caption("资料原文和工具结果留在应用中。请勿在聊天框粘贴密钥。")
+            st.caption("案例问答可发送本条问题和案例标识来识别意图。通用试点建议只发送主题词。资料原文和工具结果留在应用中。")
         if search_key:
             st.checkbox("下一条消息联网查官方网页", key=f"search-consent-{chat_id}",
                         help="只将从消息中识别出的省份、年份和公开主题发给 DeepSeek 搜索。勾选后，这条消息只走搜索工具。")

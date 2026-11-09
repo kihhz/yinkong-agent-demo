@@ -62,7 +62,7 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def _request_model(environ, system, text):
+def _request_model(environ, system, text, max_tokens=256):
     base = environ.get("MODEL_BASE_URL", "").strip().rstrip("/")
     key = environ.get("MODEL_API_KEY", "").strip()
     model = environ.get("MODEL_NAME", "").strip()
@@ -71,7 +71,7 @@ def _request_model(environ, system, text):
     if base not in ENDPOINTS:
         return {"status": "ENDPOINT_NOT_ALLOWED"}
     protocol, route = ENDPOINTS[base]
-    body = {"model": model, "max_tokens": 256, "messages": [{"role": "user", "content": text}]}
+    body = {"model": model, "max_tokens": max_tokens, "messages": [{"role": "user", "content": text}]}
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if protocol == "anthropic":
         body["system"] = system
@@ -119,6 +119,24 @@ def _parse(reply):
         return json.loads(fenced[1] if fenced else answer)
     except (ValueError, KeyError):
         return None
+
+
+def draft_method(environ, topic):
+    """Request generic guidance from a fixed topic selected by the caller."""
+    system = (
+        '你是低空应用试点的方案助手。仅输出 JSON 对象 {"steps":["...","...","..."]}。'
+        "针对给定主题写三个有先后顺序的步骤，分别讲清需求与替代方案、证据与风险核验、试点验收。"
+        "每步约五十到九十字，写具体怎么做和收集什么。不要引用真实项目、地区、数据、政策条款、网址或作批准判断。"
+    )
+    reply = _request_model(environ, system, topic, max_tokens=600)
+    result = _parse(reply) if reply["status"] == "CONNECTED" else None
+    steps = result.get("steps") if isinstance(result, dict) else None
+    if not isinstance(steps, list) or len(steps) != 3:
+        return None
+    if not all(isinstance(step, str) and 15 <= len(step.strip()) <= 180
+               and not re.search(r"https?://|[<>\[\]\r\n]", step, re.IGNORECASE) for step in steps):
+        return None
+    return [step.strip() for step in steps]
 
 
 def plan_chat(environ, prompt, active_case=None):
