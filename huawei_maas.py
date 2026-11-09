@@ -1,4 +1,4 @@
-"""Huawei Cloud MaaS inference and read-only tool routing."""
+"""Huawei Cloud MaaS client for inference and read-only tool routing."""
 
 import json
 import re

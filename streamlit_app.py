@@ -9,8 +9,12 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 from case_chat import HISTORY_REASONS, case_reply, case_topic, history_reply, method_reply, method_topic
 from demo_core_v2 import DemoService, HandoffError
-from model_demo_v4 import MAAS_BASE_URL, QUESTIONS as SYNTHETIC_QUESTIONS, draft_method, plan_chat, run_synthetic
 from region_evidence_v1 import POLICIES, REGIONS, STATS_TITLE, STATS_URL, lookup_region
+
+try:
+    from huawei_maas import MAAS_BASE_URL, QUESTIONS as SYNTHETIC_QUESTIONS, draft_method, plan_chat, run_synthetic
+except ImportError:
+    MAAS_BASE_URL = None
 
 
 CASES = {"hlj-production": "肇东农林植保", "hlj-transport": "呼玛短途运输"}
@@ -275,7 +279,8 @@ def read_model_config():
 
 
 def maas_configured(config):
-    return config["MODEL_BASE_URL"].rstrip("/") == MAAS_BASE_URL and all(config[name] for name in MODEL_CONNECTION_FIELDS)
+    return (MAAS_BASE_URL is not None and config["MODEL_BASE_URL"].rstrip("/") == MAAS_BASE_URL
+            and all(config[name] for name in MODEL_CONNECTION_FIELDS))
 
 
 def capture_chat_consent(chat_id):
@@ -288,6 +293,9 @@ def capture_chat_consent(chat_id):
 def render_model():
     st.subheader("大模型与工具联调")
     st.caption("合成模式只向模型发送选定的合成问题和对应的合成工具结果。")
+    if MAAS_BASE_URL is None:
+        st.info("模型模块正在更新。关闭左栏「模型联调」可继续查询资料库。")
+        return None
     config = read_model_config()
     code = config["MODEL_DEMO_CODE"]
     if len(code) < 16 or not maas_configured(config):
