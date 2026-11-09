@@ -1,5 +1,6 @@
 import hmac
 import os
+from collections import deque
 from threading import Lock
 from time import monotonic
 
@@ -7,7 +8,7 @@ import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
 from demo_core_v2 import DemoService, HandoffError
-from model_demo_v3 import QUESTIONS as SYNTHETIC_QUESTIONS, run_synthetic
+from model_demo_v4 import CHAT_ENDPOINTS, QUESTIONS as SYNTHETIC_QUESTIONS, plan_chat, run_synthetic
 
 
 CASES = {"hlj-production": "肇东农林植保", "hlj-transport": "呼玛短途运输"}
@@ -82,15 +83,42 @@ def resolve_question(prompt, case_id):
     return None
 
 
-def answer_question(service, chat, prompt):
-    route = resolve_question(prompt, chat.get("case_id"))
+def answer_question(service, chat, prompt, model_config=None):
+    active_case = chat.get("case_id")
+    route = resolve_question(prompt, active_case)
+    steps = []
+    if model_config:
+        if reserve_judge_request():
+            with st.spinner("DeepSeek 正在理解问题…"):
+                model_result = plan_chat(model_config, prompt, active_case)
+            status = model_result["status"]
+            if status == "CONNECTED":
+                plan = model_result["plan"]
+                case_id = plan["case_id"]
+                mode = {"read_verified_result": "history", "analyze_region": "case",
+                        "evidence_query": "evidence"}[plan["tool"]]
+                route = (mode, case_id, "短途运输" if case_id == TRANSPORT else "")
+                steps.append(f"DeepSeek 已识别意图 · {plan['tool']}")
+            elif status == "OUT_OF_SCOPE":
+                route = None
+                steps.append("DeepSeek 已识别意图 · 超出当前资料范围")
+            else:
+                http_code = model_result.get("http_code")
+                detail = f"HTTP {http_code}" if http_code else status
+                steps.append(f"DeepSeek 未完成 · {detail} · 改用本地规则")
+                st.caption(steps[-1])
+        else:
+            steps.append("模型问答达到限额 · 改用本地规则")
+            st.caption(steps[-1])
     if route is None:
-        return "目前可查询黑龙江的肇东植保、呼玛航线和历史评价状态。请点一个示例，或在提问里写明案例。", []
+        chat.pop("result", None)
+        return "目前可查询黑龙江的肇东植保、呼玛航线和历史评价状态。请点一个示例，或在提问里写明案例。", steps
 
     mode, case_id, query = route
-    steps = [f"识别问题 · {'历史评价状态' if mode == 'history' else CASES[case_id]}"]
+    steps.append(f"定位资料 · {'历史评价状态' if mode == 'history' else CASES[case_id]}")
     with st.status("正在处理问题", expanded=True) as status:
-        st.write(steps[0])
+        for step in steps:
+            st.write(step)
         try:
             if mode == "history":
                 history = service.call_tool("read_verified_result", {"case_id": case_id})
@@ -114,6 +142,9 @@ def answer_question(service, chat, prompt):
             return f"资料暂不可用（{exc.code}）。", steps
         chat.update(case_id=case_id, result=result)
         status.update(label="处理完成", state="complete", expanded=False)
+    if mode == "evidence" and evidence["hits"]:
+        first = evidence["hits"][0]
+        return f"{first['quote']}\n\n定位 {first['locator']}，原文链接见右栏「证据来源」。", steps
     return summary, steps
 
 
@@ -167,15 +198,47 @@ def model_throttle():
     return Lock(), [0.0]
 
 
-def render_model():
-    st.subheader("大模型与工具联调")
-    st.caption("模型只收到选定的合成问题和对应的合成工具结果。真实案例问答在本地只读模式运行。")
+@st.cache_resource
+def judge_request_window():
+    return Lock(), deque()
+
+
+def reserve_judge_request():
+    used = st.session_state.get("judge_model_requests", 0)
+    if used >= 12:
+        return False
+    lock, recent = judge_request_window()
+    with lock:
+        now = monotonic()
+        while recent and recent[0] <= now - 3600:
+            recent.popleft()
+        if len(recent) >= 60:
+            return False
+        recent.append(now)
+    st.session_state["judge_model_requests"] = used + 1
+    return True
+
+
+def read_model_config():
     try:
         secret_values = st.secrets.to_dict()
     except StreamlitSecretNotFoundError:
         secret_values = {}
     names = ("MODEL_BASE_URL", "MODEL_NAME", "MODEL_API_KEY", "MODEL_DEMO_CODE")
-    config = {name: str(secret_values.get(name, os.environ.get(name, ""))) for name in names}
+    return {name: str(secret_values.get(name, os.environ.get(name, ""))).strip() for name in names}
+
+
+def capture_chat_consent(chat_id):
+    consent_key = f"judge-consent-{chat_id}"
+    st.session_state[f"judge-send-{chat_id}"] = st.session_state.get(consent_key, False)
+    if consent_key in st.session_state:
+        st.session_state[consent_key] = False
+
+
+def render_model():
+    st.subheader("大模型与工具联调")
+    st.caption("合成模式只向模型发送选定的合成问题和对应的合成工具结果。")
+    config = read_model_config()
     code = config["MODEL_DEMO_CODE"]
     if len(code) < 16 or not all(config[name] for name in names[:-1]):
         st.info("云端模型暂未启用。其他三个演示问题可直接体验。")
@@ -259,15 +322,26 @@ def main():
                         with st.expander("处理进程"):
                             for step in entry["steps"]:
                                 st.write(step)
+        chat_id = st.session_state.active_chat
+        config = read_model_config()
+        endpoint = config["MODEL_BASE_URL"].rstrip("/")
+        chat_enabled = endpoint in CHAT_ENDPOINTS and config["MODEL_API_KEY"] and config["MODEL_NAME"]
+        if chat_enabled:
+            provider = "华为云 MaaS" if endpoint == "https://api.modelarts-maas.com/v2" else "DeepSeek"
+            st.checkbox(f"同意将下一条消息发送给{provider}，仅用于理解问题",
+                        key=f"judge-consent-{chat_id}")
+            st.caption("资料原文和工具结果留在应用中。未勾选时使用本地规则查询。请勿在聊天框粘贴密钥。")
         typed = st.chat_input("例如：呼玛航线计划年有证据吗？", max_chars=300,
-                              key=f"composer-{st.session_state.active_chat}")
+                              key=f"composer-{chat_id}", on_submit=capture_chat_consent, args=(chat_id,))
+        consent = st.session_state.pop(f"judge-send-{chat_id}", False)
         prompt = (example or typed or "").strip()
         if prompt:
             with history:
                 with st.chat_message("user"):
                     st.text(prompt)
                 with st.chat_message("assistant"):
-                    answer, steps = answer_question(service, chat, prompt)
+                    answer, steps = answer_question(service, chat, prompt,
+                                                    config if typed and not example and consent and chat_enabled else None)
                     st.write(answer)
             chat.setdefault("title", prompt[:18] + ("…" if len(prompt) > 18 else ""))
             chat["messages"].append({"prompt": prompt, "answer": answer, "steps": steps})
