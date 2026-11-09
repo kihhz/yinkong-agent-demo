@@ -9,6 +9,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 from demo_core_v2 import DemoService, HandoffError
 from model_demo_v4 import CHAT_ENDPOINTS, QUESTIONS as SYNTHETIC_QUESTIONS, plan_chat, run_synthetic
+from region_evidence_v1 import POLICIES, REGIONS, STATS_TITLE, STATS_URL, lookup_region
 
 
 CASES = {"hlj-production": "肇东农林植保", "hlj-transport": "呼玛短途运输"}
@@ -16,6 +17,8 @@ QUESTIONS = (
     "Q1 · 植保有何地区条件？能判断落地吗？",
     "Q2 · 历史指标为何为空？是不是零需求？",
     "Q3 · 呼玛航线依据在哪？计划年怎么填？",
+    "Q4 · 四川和广东 2024 年人口和城镇化差多少？",
+    "Q5 · 云南有哪些低空文旅政策？",
 )
 PRODUCTION = "hlj-production"
 TRANSPORT = "hlj-transport"
@@ -57,13 +60,14 @@ def render_sidebar(service):
         st.radio("对话", list(reversed(labels)), key="active_chat", format_func=labels.__getitem__)
         st.divider()
         st.subheader("资料库")
-        st.caption("黑龙江 2024 · 公开资料")
+        st.caption(f"{len(REGIONS)} 个省级地区统计背景 · {len(POLICIES)} 地低空政策或场景资料")
         sources = {}
         for case_id, label in CASES.items():
             st.write(f"• {label}")
             for source in service.evidence_query(case_id)["sources"]:
                 sources[source["id"]] = source
         with st.expander("查看资料来源", expanded=True):
+            st.markdown(f"[{STATS_TITLE}]({STATS_URL})")
             for source in sources.values():
                 st.markdown(f"[{source['title']}]({source['url']})")
         model_mode = st.toggle("模型联调")
@@ -84,6 +88,20 @@ def resolve_question(prompt, case_id):
 
 
 def answer_question(service, chat, prompt, model_config=None):
+    previous = chat.get("result")
+    regional = lookup_region(prompt, previous if previous and "facts" in previous else None)
+    if regional:
+        steps = ["查阅国家统计局 2024 年分地区人口表"]
+        if regional["regional_topic"] == "policy":
+            steps.append(f"检索公开低空资料 · 命中 {len(regional['regional_sources'])} 份")
+        steps.append("资料库只读查询")
+        with st.status("省域资料查询完成", state="complete", expanded=False):
+            for step in steps:
+                st.write(step)
+        chat.pop("case_id", None)
+        chat["result"] = regional
+        return regional["summary"], steps
+
     active_case = chat.get("case_id")
     route = resolve_question(prompt, active_case)
     steps = []
@@ -112,7 +130,7 @@ def answer_question(service, chat, prompt, model_config=None):
             st.caption(steps[-1])
     if route is None:
         chat.pop("result", None)
-        return "目前可查询黑龙江的肇东植保、呼玛航线和历史评价状态。请点一个示例，或在提问里写明案例。", steps
+        return "可查各省级地区 2024 年人口和城镇化、部分地区的低空政策，以及黑龙江的植保、呼玛航线和冻结评价。可以写明地区和要查的事项，或试一下上方示例。", steps
 
     mode, case_id, query = route
     steps.append(f"定位资料 · {'历史评价状态' if mode == 'history' else CASES[case_id]}")
@@ -170,6 +188,12 @@ def render_results(result):
             st.caption(f"C v2 冻结状态 · {history['snapshot_date']} · {version_line}")
             lines.extend(["", f"冻结状态 {history['snapshot_date']} · {version_line}", "",
                           *(f"- {label}：{reasons[label]}" for label in metrics)])
+        elif "facts" in result:
+            st.table(result["facts"])
+            st.caption("统计背景用于了解地区情况。正式评价请查看对应版本的计算状态。")
+            lines.extend(["", "## 统计背景", "", "| 省级地区 | 数据年 | 年末人口（万人） | 城镇人口比重（%） |",
+                          "| --- | --- | --- | --- |",
+                          *(f"| {' | '.join(str(value) for value in row.values())} |" for row in result["facts"])])
         else:
             analysis = result["analysis"]
             case = analysis["case"]
@@ -187,6 +211,13 @@ def render_results(result):
             render_evidence(evidence)
             lines.extend(["", "## 证据来源",
                           *(f"- [{item['title']}]({item['url']})" for item in evidence["sources"])])
+        elif "facts" in result:
+            source_links = [f"[{STATS_TITLE}]({STATS_URL})"]
+            source_links.extend(f"{item['region']} · {item['year']} · {item['kind']} · [{item['title']}]({item['url']})"
+                                for item in result["regional_sources"])
+            for link in source_links:
+                st.markdown(link)
+            lines.extend(["", "## 证据来源", *(f"- {link}" for link in source_links)])
         else:
             st.caption("来源为 C v2 随包的 B 本地运行状态摘要。网页读取冻结状态，当前未执行重算。")
     st.download_button("下载本次成果", "\n".join(lines) + "\n", "因空制宜_对话成果.md",
@@ -287,7 +318,7 @@ def main():
         return
     chat, model_mode = render_sidebar(service)
     st.title("因空制宜 Agent")
-    st.caption("黑龙江 2024 · 比赛演示 · 只读规则工具与冻结结果")
+    st.caption("省域统计对比 · 公开低空资料 · 黑龙江冻结评价")
     center, right = st.columns([1.65, 1], gap="large")
     if model_mode:
         with center:
@@ -305,7 +336,7 @@ def main():
         return
     with center:
         st.subheader("对话与处理进程")
-        with st.expander("试试这三个示例", expanded=True):
+        with st.expander("试试这些示例", expanded=True):
             choices = [st.button(q, key=f"example-{index}", width="stretch")
                        for index, q in enumerate(QUESTIONS)]
             example = next((q for q, clicked in zip(QUESTIONS, choices) if clicked), None)
@@ -331,7 +362,7 @@ def main():
             st.checkbox(f"同意将下一条消息发送给{provider}，仅用于理解问题",
                         key=f"judge-consent-{chat_id}")
             st.caption("资料原文和工具结果留在应用中。未勾选时使用本地规则查询。请勿在聊天框粘贴密钥。")
-        typed = st.chat_input("例如：呼玛航线计划年有证据吗？", max_chars=300,
+        typed = st.chat_input("例如：四川和广东城镇化差多少？", max_chars=300,
                               key=f"composer-{chat_id}", on_submit=capture_chat_consent, args=(chat_id,))
         consent = st.session_state.pop(f"judge-send-{chat_id}", False)
         prompt = (example or typed or "").strip()
