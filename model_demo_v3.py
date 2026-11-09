@@ -1,6 +1,7 @@
 """External inference and read-only tool routing for approved synthetic questions."""
 
 import json
+import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -34,6 +35,7 @@ ENDPOINTS = {
     "https://api.openai.com/v1": ("openai", "/chat/completions"),
     "https://api.deepseek.com": ("openai", "/chat/completions"),
     "https://api.deepseek.com/v1": ("openai", "/chat/completions"),
+    "https://api.modelarts-maas.com/v2": ("maas", "/chat/completions"),
     "https://api.anthropic.com": ("anthropic", "/v1/messages"),
     "https://api.anthropic.com/v1": ("anthropic", "/messages"),
 }
@@ -61,9 +63,10 @@ def _request_model(environ, system, text):
         headers.update({"x-api-key": key, "anthropic-version": "2023-06-01"})
     else:
         body["messages"].insert(0, {"role": "system", "content": system})
-        body["response_format"] = {"type": "json_object"}
+        if protocol == "openai":
+            body["response_format"] = {"type": "json_object"}
         headers["Authorization"] = f"Bearer {key}"
-        if urlsplit(base).hostname == "api.deepseek.com":
+        if protocol == "maas" or urlsplit(base).hostname == "api.deepseek.com":
             body["thinking"] = {"type": "disabled"}
     try:
         request = Request(base + route, json.dumps(body).encode("utf-8"), headers)
@@ -96,7 +99,9 @@ def _request_model(environ, system, text):
 
 def _parse(reply):
     try:
-        return json.loads(reply["answer"])
+        answer = reply["answer"].strip()
+        fenced = re.fullmatch(r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```", answer, re.IGNORECASE | re.DOTALL)
+        return json.loads(fenced[1] if fenced else answer)
     except (ValueError, KeyError):
         return None
 

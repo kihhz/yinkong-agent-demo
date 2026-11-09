@@ -7,7 +7,7 @@ import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
 from demo_core_v2 import DemoService, HandoffError
-from model_demo_v2 import QUESTIONS as SYNTHETIC_QUESTIONS, run_synthetic
+from model_demo_v3 import QUESTIONS as SYNTHETIC_QUESTIONS, run_synthetic
 
 
 CASES = {"hlj-production": "肇东农林植保", "hlj-transport": "呼玛短途运输"}

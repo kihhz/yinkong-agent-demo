@@ -28,6 +28,13 @@ MODEL_API_KEY = ""
 MODEL_DEMO_CODE = ""
 ```
 
+如果使用华为云 MaaS 上已开通的 DeepSeek-V4.1-Flash-1017，改用以下地址和模型，并填该平台生成的 MaaS API Key。
+
+```toml
+MODEL_BASE_URL = "https://api.modelarts-maas.com/v2"
+MODEL_NAME = "deepseek-v4.1-flash-1017"
+```
+
 本版也接受 OpenAI `https://api.openai.com/v1` 和 Anthropic `https://api.anthropic.com`，模型名和凭证按各自账号填写。Secrets 的实际值只留在云端设置或本地忽略的 `.streamlit/secrets.toml`。每轮合成联调最多两次模型请求，分别理解问题和解释工具结果。页面显示「模型已返回」并列出已执行工具才算闭环成功。联调间隔至少 30 秒，模型输出不写磁盘。用量取自接口回传，扣费以供应商账单为准。
 
 模型只收到固定合成问题及同一合成夹具的只读工具返回。真实对话文本、案例检索、来源及冻结状态留在应用进程内。模型超时、返回非法计划或解释校验失败时，真实案例仍可使用。
