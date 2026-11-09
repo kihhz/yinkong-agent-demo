@@ -20,6 +20,7 @@ QUESTIONS = (
     "Q4 · 四川和广东 2024 年人口和城镇化差多少？",
     "Q5 · 云南有哪些低空文旅政策？",
 )
+MODEL_CONNECTION_FIELDS = ("MODEL_BASE_URL", "MODEL_NAME", "MODEL_API_KEY")
 PRODUCTION = "hlj-production"
 TRANSPORT = "hlj-transport"
 
@@ -255,8 +256,8 @@ def read_model_config():
         secret_values = st.secrets.to_dict()
     except StreamlitSecretNotFoundError:
         secret_values = {}
-    names = ("MODEL_BASE_URL", "MODEL_NAME", "MODEL_API_KEY", "MODEL_DEMO_CODE")
-    return {name: str(secret_values.get(name, os.environ.get(name, ""))).strip() for name in names}
+    return {name: str(secret_values.get(name, os.environ.get(name, ""))).strip()
+            for name in (*MODEL_CONNECTION_FIELDS, "MODEL_DEMO_CODE")}
 
 
 def capture_chat_consent(chat_id):
@@ -271,8 +272,8 @@ def render_model():
     st.caption("合成模式只向模型发送选定的合成问题和对应的合成工具结果。")
     config = read_model_config()
     code = config["MODEL_DEMO_CODE"]
-    if len(code) < 16 or not all(config[name] for name in names[:-1]):
-        st.info("云端模型暂未启用。其他三个演示问题可直接体验。")
+    if len(code) < 16 or not all(config[name] for name in MODEL_CONNECTION_FIELDS):
+        st.info("合成联调暂未配置。关闭左栏「模型联调」可返回普通对话。")
         return None
     supplied = st.text_input("模型联调码", type="password", max_chars=128)
     if not hmac.compare_digest(code.encode("utf-8"), supplied.encode("utf-8")):
