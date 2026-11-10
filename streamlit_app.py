@@ -4,15 +4,17 @@ from html import escape
 from pathlib import Path
 from threading import Lock
 from time import monotonic
+from uuid import uuid4
 
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
-from judge_chat_view import build_brief, make_outcome, route_for
-from judge_catalog import (
+from judge_attachments import FILE_TYPES, MAX_FILE_MB, MAX_FILES, display_name, read_attachment
+from judge_evidence import (
     MAX_QUESTION, PUBLIC_SOURCES, REGIONS, STATS_URL, STATS_YEAR,
-    answer, catalog_response, conversation_summary,
+    answer, catalog_response, conversation_summary, is_greeting, read_pdf,
 )
+from judge_results import build_brief, make_outcome, route_for
 from report_docx import build as word_report
 
 LOGO = Path(__file__).parent / "assets" / "yinkong-logo.jpg"
@@ -141,18 +143,27 @@ def model_key():
 
 def new_chat():
     st.session_state["judge_turns"] = []
-    st.session_state[DRAFT] = ""
+    st.session_state["judge_composer_id"] = uuid4().hex
     st.session_state["show-results"] = False
     st.session_state.pop("judge_pending_question", None)
+    clear_attachments()
 
 
-def prefill(question):
-    st.session_state[DRAFT] = question
+def clear_attachments():
+    st.session_state.pop("judge_attachments", None)
+    st.session_state.pop("judge_attachment_group", None)
 
 
-def queue_question():
-    if question := (st.session_state[DRAFT] or "").strip():
-        st.session_state["judge_pending_question"] = question
+def prefill(question, draft_key):
+    st.session_state[draft_key] = question
+
+
+def queue_question(draft_key):
+    submission = st.session_state[draft_key]
+    if submission is not None:
+        question = submission.text.strip()
+        if question or submission.files:
+            st.session_state["judge_pending_question"] = (question, submission.files)
 
 
 def badge(label, warning=False):
@@ -194,44 +205,84 @@ def sidebar(key, turns):
 
 def render_sources(rows):
     if not rows:
-        st.caption("暂无直接公开依据。")
+        st.caption("暂无直接依据。")
     for row in rows:
         with st.expander(f"[{row['number']}] {row['title']}"):
             st.caption(row["locator"])
-            st.markdown(row["text"])
             if row["url"]:
+                st.markdown(row["text"])
                 st.link_button("查看原文", row["url"])
+            else:
+                st.text(row["text"])
 
 
 def render_reply(turn):
     view, status = turn["view"], turn["result"]["status"]
     badge(view["route"])
+    for message in turn.get("upload_notes", ()):
+        st.warning(message)
+    if status == "ATTACHMENT_ERROR":
+        return
     if status in MODEL_FAILURES:
         st.error("华为云模型暂不可用。" + MODEL_FAILURES[status])
     elif status == "RATE_LIMIT":
         st.warning("本次未调用模型。体验调用额度暂时用完，请稍后重试。")
     if status not in {"CONNECTED", "CATALOG"}:
-        st.caption("以下为系统能力说明。" if view["general"] else "以下为确定性资料核查。")
+        st.caption("以下为已提取的资料。" if not view["general"] else "以下为系统能力说明。")
     st.markdown(view["body"])
     if view["sources"] and status != "CATALOG":
-        with st.expander("查看公开依据"):
-            for row in view["sources"][:4]:
-                st.markdown(f"**[{row['number']}] {row['title']}**")
+        with st.expander("查看依据"):
+            for row in view["sources"]:
+                st.text(f"[{row['number']}] {row['title']}")
                 st.caption(row["locator"])
-                st.markdown(row["text"])
                 if row["url"]:
+                    st.markdown(row["text"])
                     st.link_button("查看原文", row["url"])
+                else:
+                    st.text(row["text"])
     with st.expander("处理过程"):
         for i, step in enumerate(view["steps"], 1):
             st.markdown(f"{i}. {step}")
 
 
-def submit(key, turns, prompt):
-    route = route_for(prompt, turns)
-    turn = catalog_response(prompt)
+def store_attachments(files):
+    clear_attachments()
+    documents, notes = [], []
+    if len(files) > MAX_FILES:
+        return [f"一次最多可上传 {MAX_FILES} 个文件。请减少附件后重新发送。"]
+    for upload in files:
+        try:
+            item = read_attachment(upload.getvalue(), upload.name, read_pdf)
+        except ValueError as error:
+            notes.append(f"{display_name(upload.name)}：{error}")
+        else:
+            documents.append(item)
+            if item.truncated:
+                notes.append(f"{item.name}：文件内容较多，本次按可读取范围提取片段。")
+    if documents:
+        st.session_state["judge_attachments"] = tuple(documents)
+        st.session_state["judge_attachment_group"] = uuid4().hex
+    return notes
+
+
+def submit(key, turns, prompt, files=()):
+    notes = store_attachments(files) if files else []
+    attachments = st.session_state.get("judge_attachments", ())
+    if files and not attachments:
+        turns.append({
+            "question": prompt, "regions": (), "cited": [],
+            "result": {"status": "ATTACHMENT_ERROR"}, "upload_notes": notes,
+            "view": {"route": "会话附件", "general": True},
+        })
+        return
+    route = "会话附件" if attachments and not is_greeting(prompt) else route_for(prompt, turns)
+    turn = catalog_response(prompt, has_attachment=bool(attachments)) if not files else None
     if turn is None:
         blocked = bool(key) and not reserve_request()
-        turn = answer(key, prompt, turns, use_local=not key or blocked)
+        turn = answer(key, prompt, turns, use_local=not key or blocked,
+                      attachments=attachments if not is_greeting(prompt) else (),
+                      attachment_group=st.session_state.get("judge_attachment_group")
+                      if not is_greeting(prompt) else None)
         if blocked:
             turn["result"]["status"] = "RATE_LIMIT"
     view = make_outcome(turn, route)
@@ -239,6 +290,7 @@ def submit(key, turns, prompt):
         view["brief"] = build_brief(prompt, view)
         view["steps"].append("整理当前分析简报")
     turn["view"] = view
+    turn["upload_notes"] = notes
     turns.append(turn)
 
 
@@ -290,6 +342,7 @@ def main():
                        initial_sidebar_state="expanded")
     st.markdown(CSS, unsafe_allow_html=True)
     turns = st.session_state.setdefault("judge_turns", [])
+    draft_key = DRAFT + st.session_state.get("judge_composer_id", "")
     key = model_key()
     with st.container(key="viewport"):
         with st.container(key="page-title"):
@@ -308,24 +361,32 @@ def main():
                             st.caption("试试这些问题")
                             for i, sample in enumerate(EXAMPLES):
                                 st.button(sample, key=f"example-{i}", width="stretch",
-                                          on_click=prefill, args=(sample,))
+                                          on_click=prefill, args=(sample, draft_key))
                     for turn in turns:
                         render_turn(turn)
-                    if prompt := st.session_state.pop("judge_pending_question", ""):
+                    if submission := st.session_state.pop("judge_pending_question", None):
+                        prompt, files = submission
+                        if not prompt or (files and is_greeting(prompt)):
+                            prompt = "请概括上传附件的主要内容，并标明依据。"
                         with st.chat_message("user"):
                             st.text(prompt)
                         with st.chat_message("assistant"):
                             with st.spinner("正在查找资料并整理回答…"):
-                                submit(key, turns, prompt)
+                                submit(key, turns, prompt, files)
                             render_reply(turns[-1])
                     render_session_summary(turns)
                     if turns:
                         with st.expander("示例问题"):
                             for i, sample in enumerate(EXAMPLES):
-                                st.button(sample, key=f"example-{i}", on_click=prefill, args=(sample,))
+                                st.button(sample, key=f"example-{i}", on_click=prefill, args=(sample, draft_key))
                 with st.container(key="composer"):
-                    st.chat_input("输入问题，按 Enter 发送", key=DRAFT, max_chars=MAX_QUESTION,
-                                  on_submit=queue_question)
+                    if attachments := st.session_state.get("judge_attachments"):
+                        st.text("当前附件 · " + "、".join(item.name for item in attachments))
+                        st.button("清除附件", on_click=clear_attachments)
+                    st.chat_input("输入问题，按 Enter 发送", key=draft_key, max_chars=MAX_QUESTION,
+                                  accept_file="multiple", file_type=FILE_TYPES, max_upload_size=MAX_FILE_MB,
+                                  on_submit=queue_question, args=(draft_key,))
+                    st.caption("点输入框左侧的 ＋ 添加 PDF、DOCX、XLSX 或 CSV。发送后，相关片段由华为云模型处理。")
             with right:
                 results_panel(turns[-1] if turns else None)
     sidebar(key, turns)
