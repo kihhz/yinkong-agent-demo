@@ -177,7 +177,6 @@ def sidebar(key, turns):
             st.image(str(LOGO), width=174)
         st.markdown("### 因空制宜")
         st.caption("低空经济决策助手")
-        badge("评委体验")
         st.button("＋ 新建对话", on_click=new_chat, type="primary", width="stretch")
         st.markdown("### 历史问题")
         if not turns:
