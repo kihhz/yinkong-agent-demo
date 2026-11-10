@@ -9,7 +9,7 @@ from uuid import uuid4
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
-from judge_core import MAX_QUESTION, PUBLIC_SOURCES, answer, conversation_summary, read_pdf, report
+from judge_workbench import MAX_QUESTION, PUBLIC_SOURCES, answer, conversation_summary, read_pdf, report
 from report_docx import build as word_report
 
 LOGO = Path(__file__).parent / "assets" / "yinkong-logo.jpg"
