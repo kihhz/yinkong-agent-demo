@@ -1,6 +1,7 @@
 """Public Streamlit workbench for judges."""
 from collections import deque
 from hashlib import sha256
+from pathlib import Path
 from threading import Lock
 from time import monotonic
 from uuid import uuid4
@@ -8,24 +9,23 @@ from uuid import uuid4
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
-from huawei_maas import MAAS_MODEL
-from judge_core import MAX_QUESTION, PUBLIC_SOURCES, SCOPE, answer, read_pdf, report
+from judge_core import MAX_QUESTION, PUBLIC_SOURCES, answer, conversation_summary, read_pdf, report
 from report_docx import build as word_report
 
-RELEASE = "评委体验版 0.11.4-web.1"
+LOGO = Path(__file__).parent / "assets" / "yinkong-logo.jpg"
 EXAMPLES = (
     ("黑龙江政策", "黑龙江有哪些低空经济政策？请标注出处。"),
     ("黑龙江场景", "请结合黑龙江公开政策和场景清单，分析适合优先调研的场景，说明依据和待补条件。"),
     ("福建与安徽", "比较福建与安徽低空经济应用场景的政策方向和试点前提。"),
 )
 ERRORS = {
-    "NOT_CONFIGURED": "管理员尚未配置华为云模型。请稍后重试。",
-    "UNAVAILABLE": "华为云 MaaS 暂未响应，可能是网络异常或超时。请稍后重新发送。",
-    "HTTP_ERROR": "华为云 MaaS 返回请求错误。请稍后重试。",
-    "EMPTY_RESPONSE": "华为云 MaaS 返回空内容。请稍后重试。",
-    "RESPONSE_TOO_LARGE": "华为云 MaaS 响应超过本版上限。请缩小问题范围。",
-    "INVALID_RESPONSE": "未能读取华为云 MaaS 的响应。请稍后重试。",
-    "EVIDENCE_VALIDATION_FAILED": "华为云已返回，但引用或评分边界校验未通过。请明确地区和问题后重试。",
+    "NOT_CONFIGURED": "问答暂不可用。你仍可查看精选公开资料。",
+    "UNAVAILABLE": "问答响应超时，请稍后重新发送。",
+    "HTTP_ERROR": "问答请求失败，请稍后重试。",
+    "EMPTY_RESPONSE": "本次未收到回复，请重新发送。",
+    "RESPONSE_TOO_LARGE": "回复过长，请缩小问题范围。",
+    "INVALID_RESPONSE": "本次未能读取回复，请重新发送。",
+    "EVIDENCE_VALIDATION_FAILED": "本次回答缺少可核对的依据，请明确地区或场景后重试。",
     "RATE_LIMIT": "体验调用额度暂时用完。请稍后重试。",
     "PDF_CONSENT": "若要基于附件回答，请勾选允许发送相关片段后重新发送。",
 }
@@ -35,10 +35,8 @@ CSS = """
 [data-testid="stSidebar"] {border-right: 1px solid #e3e8ef;}
 [data-testid="stHeadingWithActionElements"] h1 {color:#183256; font-size:2rem;}
 [data-testid="stChatMessage"] {background:#fff; border-radius:14px; padding:.6rem;}
-.yk-brand {display:flex; align-items:center; gap:.65rem; margin-bottom:.7rem;}
-.yk-brand strong {font-size:1.16rem; color:#183256;}
-.yk-logo {color:white; background:#244e7a; border-radius:10px; padding:.36rem .55rem; font-weight:700;}
-.yk-brand small {display:block; color:#566987;}
+.st-key-brand-logo [data-testid="stImage"] {display:flex; justify-content:center;}
+.st-key-brand-logo img {border-radius:12px;}
 </style>
 """
 
@@ -100,11 +98,8 @@ def update_pdf(chat, uploaded):
 
 def sidebar(cid, chat):
     with st.sidebar:
-        st.markdown(
-            '<div class="yk-brand"><span class="yk-logo">空</span><div>'
-            '<strong>因空制宜</strong><small>低空经济决策助手</small></div></div>',
-            unsafe_allow_html=True,
-        )
+        with st.container(key="brand-logo"):
+            st.image(str(LOGO), width=220)
         st.button("＋ 新建会话", on_click=new_chat, width="stretch")
         st.subheader("会话历史")
         for key, item in reversed(list(st.session_state["chats"].items())):
@@ -125,12 +120,11 @@ def sidebar(cid, chat):
         with st.expander("精选公开资料"):
             for entry in PUBLIC_SOURCES:
                 st.link_button(entry["title"], entry["url"], width="stretch")
-        st.caption("会话和附件临时保存。刷新页面或会话断开后，记录可能丢失，请及时下载。")
 
 
 def render_sources(rows):
     if not rows:
-        st.caption("本轮没有引用资料。")
+        st.caption("暂无引用资料。")
     for row in rows:
         with st.expander(f"[{row['number']}] {row['title']}"):
             st.caption(row["locator"])
@@ -145,24 +139,11 @@ def render_reply(turn):
     outcome = turn["result"]
     if outcome["status"] == "CONNECTED":
         st.markdown(outcome["answer"])
-        if outcome.get("finish_reason") == "length":
-            st.caption("模型达到本轮输出上限，可继续追问。")
     else:
-        detail = f" HTTP {outcome['http_code']}。" if outcome.get("http_code") else ""
-        st.error(ERRORS.get(outcome["status"], "模型未完成本轮回答。") + detail)
-    with st.expander("处理过程"):
-        st.write(f"本轮选取 {len(turn['sources'])} 条资料，实际引用 {len(turn['cited'])} 条。")
-        st.write(f"模型状态 {outcome['status']}")
-        if outcome.get("http_code"):
-            st.write(f"华为云 MaaS · {MAAS_MODEL} · HTTP {outcome['http_code']}")
-        if outcome.get("elapsed_seconds") is not None:
-            st.write(f"模型耗时 {outcome['elapsed_seconds']} 秒")
-        usage = outcome.get("usage", {})
-        if usage:
-            st.write(
-                f"输入 {usage.get('prompt_tokens', usage.get('input_tokens', '未返回'))} tokens，"
-                f"输出 {usage.get('completion_tokens', usage.get('output_tokens', '未返回'))} tokens"
-            )
+        st.error(ERRORS.get(outcome["status"], "本次未能完成回答。"))
+    if turn["cited"]:
+        with st.expander("本次回答依据"):
+            render_sources(turn["cited"])
 
 
 def submit(key, chat, prompt, allow_pdf):
@@ -184,33 +165,32 @@ def submit(key, chat, prompt, allow_pdf):
     if status:
         return {"question": prompt, "regions": (), "sources": [], "cited": [],
                 "result": {"status": status}, "uses_pdf": False}
-    with st.spinner("正在检索资料并请求华为云 MaaS…"):
+    with st.spinner("正在查找资料并整理回答…"):
         return answer(key, prompt, chat["turns"],
                       pdf["pages"] if pdf and allow_pdf else (),
                       pdf["name"] if pdf and allow_pdf else "")
 
 
-def results_panel(turn):
+def results_panel(turns):
     st.subheader("对话成果")
-    if not turn:
-        st.info("提出问题后，这里将显示结论、来源和报告。")
+    findings, pending, citations = conversation_summary(turns)
+    if not findings and not pending:
+        st.info("提出具体问题后，这里会汇总会话要点。")
         return
-    conclusion, sources, preview = st.tabs(["结论", "来源引用", "报告预览"])
-    outcome = turn["result"]
+    conclusion, sources, preview = st.tabs(["会话总结", "来源引用", "报告预览"])
     with conclusion:
-        if outcome["status"] == "CONNECTED":
-            st.markdown(outcome["answer"])
-        else:
-            st.caption("本轮未形成模型结论。请查看对话中的状态。")
+        for item in findings:
+            st.text(item["question"])
+            st.markdown(item["note"])
+        if pending:
+            st.caption("尚未完成的问题")
+            for question in pending:
+                st.text(question)
     with sources:
-        render_sources(turn["cited"])
-        other = [row for row in turn["sources"] if row not in turn["cited"]]
-        if other:
-            st.caption("以下资料在本轮检索命中，未作为结论引用。")
-            render_sources(other)
+        render_sources(citations)
     with preview:
-        if outcome["status"] == "CONNECTED":
-            content = report(turn)
+        if findings:
+            content = report(findings, pending, citations)
             st.markdown(content)
             st.download_button("下载 Markdown", content, "因空制宜_分析报告.md", "text/markdown",
                                key="download-md", on_click="ignore")
@@ -218,7 +198,7 @@ def results_panel(turn):
                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                key="download-word", on_click="ignore")
         else:
-            st.caption("模型成功返回后可预览和下载报告。")
+            st.caption("回答完成后可预览和下载报告。")
 
 
 def main():
@@ -232,12 +212,11 @@ def main():
     sidebar(cid, chat)
     key = model_key()
     st.title("因空制宜 Agent")
-    st.caption(f"{RELEASE}  ·  {SCOPE}")
     if not key:
-        st.warning("华为云 MaaS 尚未配置。仍可查看公开资料。")
+        st.warning(ERRORS["NOT_CONFIGURED"])
     center, right = st.columns([1.75, 1], gap="large")
     with center:
-        st.subheader("对话与处理进程")
+        st.subheader("对话")
         prompt = None
         if not chat["turns"]:
             st.caption("输入地区、场景或想核实的政策。也可试试下面的问题。")
@@ -256,7 +235,6 @@ def main():
                 "允许将这份 PDF 的相关文字片段发送给华为云 MaaS",
                 key=f"pdf-consent-{cid}-{pdf['key'][0]}",
             )
-        st.caption("提问内容由华为云 MaaS 处理。附件仅在同意后发送相关片段。")
         entered = st.chat_input("输入问题并发送", max_chars=MAX_QUESTION)
         if prompt := (entered or prompt):
             prompt = prompt.strip()
@@ -264,10 +242,10 @@ def main():
                 turn = submit(key, chat, prompt, allow_pdf)
                 if not chat["turns"]:
                     chat["name"] = prompt[:22]
-                chat["turns"] = [*chat["turns"][-19:], turn]
+                chat["turns"].append(turn)
                 st.rerun()
     with right:
-        results_panel(chat["turns"][-1] if chat["turns"] else None)
+        results_panel(chat["turns"])
 
 
 if __name__ == "__main__":

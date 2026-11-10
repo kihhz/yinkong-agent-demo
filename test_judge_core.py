@@ -6,7 +6,7 @@ from zipfile import ZipFile
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
-from judge_core import answer, read_pdf, report, select_evidence
+from judge_core import answer, conversation_summary, read_pdf, report, select_evidence
 from report_docx import build as word_report
 
 
@@ -55,7 +55,7 @@ class JudgeTests(unittest.TestCase):
         evidence = model.call_args.args[2]["evidence"]
         self.assertIn("Project Willow", evidence[0]["text"])
         self.assertEqual(result["cited"][0]["locator"], "第 1 页")
-        markdown = report(result)
+        markdown = report(*conversation_summary([result]))
         self.assertIn("synthetic.pdf", markdown)
         with ZipFile(io.BytesIO(word_report(markdown))) as doc:
             self.assertIn("synthetic.pdf", doc.read("word/document.xml").decode())
@@ -81,6 +81,28 @@ class JudgeTests(unittest.TestCase):
     def test_invalid_upload(self):
         with self.assertRaises(ValueError):
             read_pdf(b"not a pdf", "invalid.pdf")
+
+    def test_session_summary_includes_prior_questions_and_remaps_references(self):
+        replies = [
+            {"status": "CONNECTED", "answer": "您好"},
+            {"status": "CONNECTED", "answer": "本次查到肇东植保资料。[3]\n\n### 本题要点\n核实当地植保作业条件。[3]"},
+            {"status": "CONNECTED", "answer": "福建有低空文旅案例。[2]\n\n### 本题要点\n可参考福建文旅案例。[2]"},
+            {"status": "HTTP_ERROR", "http_code": 503},
+        ]
+        turns = []
+        with patch("judge_core.judge_answer", side_effect=replies):
+            for question in ["你好", "黑龙江植保有什么依据？", "福建文旅有什么案例？", "后续怎么落地？"]:
+                turns.append(answer("test", question, turns))
+        findings, pending, sources = conversation_summary(turns)
+        self.assertEqual([f["note"] for f in findings],
+                         ["核实当地植保作业条件。[1]", "可参考福建文旅案例。[2]"])
+        self.assertEqual([s["region"] for s in sources], ["黑龙江", "福建"])
+        self.assertEqual(pending, ["后续怎么落地？"])
+        self.assertNotIn("本题要点", turns[1]["result"]["answer"])
+        content = report(findings, pending, sources)
+        for item in ["黑龙江植保", "福建文旅", "后续怎么落地", "来源与定位"]:
+            self.assertIn(item, content)
+        self.assertNotIn("您好", content)
 
 
 if __name__ == "__main__":
