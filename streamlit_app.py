@@ -217,12 +217,6 @@ def main():
     center, right = st.columns([1.75, 1], gap="large")
     with center:
         st.subheader("对话")
-        prompt = None
-        if not chat["turns"]:
-            st.caption("输入地区、场景或想核实的政策。也可试试下面的问题。")
-            for column, (label, sample) in zip(st.columns(3), EXAMPLES):
-                if column.button(label, key="example-" + label, width="stretch"):
-                    prompt = sample
         for turn in chat["turns"]:
             with st.chat_message("user"):
                 st.text(turn["question"])
@@ -235,6 +229,11 @@ def main():
                 "允许将这份 PDF 的相关文字片段发送给华为云 MaaS",
                 key=f"pdf-consent-{cid}-{pdf['key'][0]}",
             )
+        st.caption("示例问题")
+        prompt = None
+        for column, (label, sample) in zip(st.columns(3), EXAMPLES):
+            if column.button(label, key="example-" + label, help=sample, width="stretch"):
+                prompt = sample
         entered = st.chat_input("输入问题并发送", max_chars=MAX_QUESTION)
         if prompt := (entered or prompt):
             prompt = prompt.strip()
