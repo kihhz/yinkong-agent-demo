@@ -2,6 +2,7 @@
 
 import json
 import re
+from time import monotonic
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
@@ -31,6 +32,7 @@ EXPLAIN_SYSTEM = (
     '只写给定事实和缺项，最多两句，不编数字、日期或审批。'
 )
 MAAS_BASE_URL = "https://api.modelarts-maas.com/v2"
+MAAS_MODEL = "deepseek-v4.1-flash-1017"
 MAX_BODY = 256_000
 CHAT_CASES = {"hlj-production", "hlj-transport"}
 CHAT_TOOLS = {"analyze_region", "evidence_query", "read_verified_result"}
@@ -49,7 +51,7 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def _request_model(environ, system, text, max_tokens=256):
+def _request_model(environ, system, text, max_tokens=256, max_chars=2000):
     base = environ.get("MODEL_BASE_URL", "").strip().rstrip("/")
     key = environ.get("MODEL_API_KEY", "").strip()
     model = environ.get("MODEL_NAME", "").strip()
@@ -64,10 +66,12 @@ def _request_model(environ, system, text, max_tokens=256):
         "thinking": {"type": "disabled"},
     }
     headers = {"Content-Type": "application/json", "Accept": "application/json", "Authorization": f"Bearer {key}"}
+    started = monotonic()
     try:
         request = Request(MAAS_BASE_URL + "/chat/completions", json.dumps(body).encode("utf-8"), headers)
         opener = build_opener(ProxyHandler({}), NoRedirect())
         with opener.open(request, timeout=20) as response:
+            http_code = response.status
             raw = response.read(MAX_BODY + 1)
         if len(raw) > MAX_BODY:
             return {"status": "RESPONSE_TOO_LARGE"}
@@ -77,10 +81,11 @@ def _request_model(environ, system, text, max_tokens=256):
             return {"status": "EMPTY_RESPONSE"}
         usage = result.get("usage", {})
         usage = {name: value for name in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens",
-                                         "prompt_cache_miss_tokens", "input_tokens", "output_tokens")
+                                         "prompt_cache_miss_tokens", "input_tokens", "output_tokens", "total_tokens")
                  if isinstance(usage, dict) and type(value := usage.get(name)) is int and value >= 0}
-        return {"status": "CONNECTED", "answer": answer.strip().replace(key, "[redacted]")[:2000],
-                "usage": usage}
+        return {"status": "CONNECTED", "answer": answer.strip().replace(key, "[redacted]")[:max_chars],
+                "usage": usage, "http_code": http_code, "elapsed_seconds": round(monotonic() - started, 2),
+                "finish_reason": result["choices"][0].get("finish_reason")}
     except HTTPError as exc:
         exc.close()
         return {"status": "HTTP_ERROR", "http_code": exc.code}
@@ -88,6 +93,13 @@ def _request_model(environ, system, text, max_tokens=256):
         return {"status": "UNAVAILABLE"}
     except (ValueError, KeyError, IndexError, TypeError):
         return {"status": "INVALID_RESPONSE"}
+
+
+def judge_answer(key, system, payload):
+    return _request_model(
+        {"MODEL_API_KEY": key, "MODEL_BASE_URL": MAAS_BASE_URL, "MODEL_NAME": MAAS_MODEL},
+        system, json.dumps(payload, ensure_ascii=False), max_tokens=1350, max_chars=6000,
+    )
 
 
 def _parse(reply):

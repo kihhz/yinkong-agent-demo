@@ -1,37 +1,41 @@
-# 因空制宜 Agent｜省域资料与黑龙江案例演示
+# 因空制宜 Agent · 评委体验版
 
-此版本提供肇东农林植保、呼玛短途运输、证据检索和省级冻结状态。黑龙江统计和任务资料基准年为 2024。Q2 读取 C v2 随包的 B 本地运行状态摘要，保留各指标空值和原因。当前网页只读，不运行正式评分。
+基于现有 GitHub 与 Streamlit Community Cloud。界面参照 C 的 V0.11.4 三栏工作台，网页版本为 0.11.4-web.1。资料检索使用本仓库精选公开摘要，回答由服务端华为云 MaaS 的 deepseek-v4.1-flash-1017 生成。该版本提供定性研判。
 
-左栏可新建和切换对话、查看资料库。中栏可选择示例或直接提问，并显示实际处理步骤。右栏保留当前对话最新的结论、证据和 Markdown 下载。对话记录仅保存在当前浏览器会话中。
+[评委体验入口](https://yinkong-agent-demo-wozfzuu5gmiya8njztqgsy.streamlit.app/)
 
-省域资料查询覆盖中国大陆 31 个省级地区的 2024 年末人口和城镇人口比重，支持同年对比。黑龙江、吉林、广东、四川、云南可查已核对的官方低空资料摘要。省域查询在本地资料库中运行，返回年份与原文链接。网页尚无实时联网检索，统计背景用于地区对比。
+## 使用
+
+1. 在中栏输入问题，或点击首页示例。可在同一会话继续追问。
+2. 右栏查看引用、原文、报告预览，下载 Markdown 或 Word。
+3. 如需分析附件，在左栏上传小型文本 PDF。每份最多 3 MB、20 页。发送前勾选允许把所选文件的相关片段交给华为云，再发附件问题。
+
+提供国家、黑龙江、福建、安徽精选政策与案例。资料库不等于全网搜索。用户提问由华为云处理，附件仅在选中授权后发送部分文本，问答与文件随会话保留，刷新、断线或重启可能丢失。扫描件不做 OCR。正式定量评价和专业审核在本地正式版执行。
+
+## 部署
+
+在 Streamlit Cloud 使用现有仓库 `kihhz/yinkong-agent-demo`、`main` 分支、入口 `streamlit_app.py`。依赖见 `requirements.txt`。
+
+在 App settings → Secrets 保留现有 `MODEL_API_KEY`。新增时填写下列模板并替换占位文本。云端应用亦兼容 `MAAS_API_KEY`。
+
+```toml
+MODEL_API_KEY = "填入可用的华为云 MaaS API Key"
+```
+
+模型与地址由代码固定为华为云 MaaS 中国站。调用失败显示明确状态和可用的 HTTP 状态码。每条问题最多一次模型调用，20 秒网络超时，1,350 输出 token 上限。每会话每 10 分钟最多 10 次，间隔至少 2 秒。单进程每小时最多 60 次、滚动 24 小时最多 180 次，进程重启后计数重置。处理过程显示服务端实际返回的 token 用量，扣费金额以华为云控制台为准。
+
+[Streamlit Secrets](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management) · [华为云模型接入](https://support.huaweicloud.com/bestpractice-maas/bestpractice_maas_0014_02.html) · [华为云计费说明](https://support.huaweicloud.com/price-maas/price-maas-0002.html)
 
 ## 本地运行
 
-推荐 Python 3.14。在项目目录执行：
-
-```powershell
+```sh
 python -m pip install -r requirements.txt
+python -m unittest -v test_judge_core
 python -m streamlit run streamlit_app.py
 ```
 
-## Community Cloud
+本地真实联调可在 .streamlit/secrets.toml 配置凭证。该文件受 .gitignore 保护。
 
-从 GitHub 仓库的 `main` 分支创建应用，入口填 `streamlit_app.py`，在 Advanced settings 选择 Python 3.14。部署后用无痕窗口打开生成的 `streamlit.app` 网址，依次运行 Q1、Q2 和 Q3。Q1 应显示植保条件和证据，Q2 的 N/D/S/G/T 均为未计算，Q3 应找到清单第 2 页的呼玛短途运输并显示计划年未证实。切换网络再检查一次评审链接。
+## 和 C 本地版同步
 
-## 模型联调
-
-评委直接使用中间聊天框，无需联调码。案例问答按现有证据解释结论，可接着问年份、依据和待补材料。勾选允许模型后，案例问答可把本条输入和当前案例标识发给模型来识别意图。询问「低空物流试点怎么设计」等通用方法时，只将预设的主题词发给模型来生成建议。资料与工具结果留在应用内。公开聊天的外部请求限每个浏览器会话 12 次、每个服务实例每小时 60 次，超限后可继续使用资料库。
-
-模型调用仅使用华为云 MaaS。需要验证模型时，由账号持有人在 Streamlit 的 **Settings → Secrets** 填写华为云 MaaS 配置，再开启左栏「模型联调」并选一个合成问题。联调码至少 16 个字符，与 MaaS API Key 分开。
-
-```toml
-MODEL_BASE_URL = "https://api.modelarts-maas.com/v2"
-MODEL_NAME = "deepseek-v4.1-flash-1017"
-MODEL_API_KEY = ""
-MODEL_DEMO_CODE = ""
-```
-
-Secrets 的实际值只留在云端设置或本地忽略的 `.streamlit/secrets.toml`。每轮合成联调最多两次模型请求，分别理解问题和解释工具结果。页面显示「模型已返回」并列出已执行工具才算闭环成功。联调间隔至少 30 秒，模型输出不写磁盘。用量取自接口回传，扣费以华为云账单为准。
-
-联调模式只向模型发送固定合成问题和合成工具结果。普通聊天的案例原文、检索证据和冻结结果留在应用进程内。模型不可用时仍可查询资料库。
+每轮从 C 获取版本号、变更清单、验收案例和可公开资料的出处。将核实的公开摘要加到 `demo_data/judge_sources.json`，从同一数据构造引用和导出；`report_docx.py` 复用 C 的 Markdown 到 Word 版式转换。优先同步验证过的交互、证据标识和报告结构。只在获得适合公网的已验收服务后另行接入正式测度。
