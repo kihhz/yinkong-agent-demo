@@ -7,11 +7,19 @@ from pathlib import Path
 from pypdf import PdfReader
 
 from huawei_maas import judge_answer
-from region_evidence_v1 import PROVINCE_PATTERN
+from region_evidence_v1 import POLICIES, PROVINCE_PATTERN, REGIONS, STATS_TITLE, STATS_URL, STATS_YEAR
 
 PUBLIC_SOURCES = json.loads(
     (Path(__file__).parent / "demo_data" / "judge_sources.json").read_text(encoding="utf-8")
 )
+for region, policy in POLICIES.items():
+    if not any(row["region"] == region for row in PUBLIC_SOURCES):
+        PUBLIC_SOURCES.append({
+            "id": f"regional-policy-{region}", "region": region,
+            "title": policy["title"], "locator": f"{policy['year']} 年 · {policy['kind']}",
+            "url": policy["url"], "text": policy["summary"],
+        })
+POLICY_REGIONS = tuple(dict.fromkeys(row["region"] for row in PUBLIC_SOURCES if row["region"] != "全国"))
 MAX_PDF_BYTES = 3 * 1024 * 1024
 MAX_PDF_PAGES = 20
 MAX_PAGE_CHARS = 1800
@@ -19,6 +27,13 @@ MAX_UPLOAD_CHARS = 4600
 MAX_QUESTION = 1000
 GREETINGS = {"你好", "您好", "嗨", "hello", "hi", "谢谢", "你是谁", "你能做什么"}
 DOMAIN = re.compile("政策|低空|场景|空域|植保|巡检|配送|应急|物流|文旅|航线|通航|无人机|载人|依据|地区|评价|评分")
+STATISTICS_QUERY = re.compile("人口|城镇化|城镇比重|地区概况|基本情况|区域画像|人口数据")
+CATALOG_QUERY = re.compile(
+    r"(?:资料库|数据库|知识库|资料目录|内置资料|公开资料|资料覆盖).{0,35}"
+    r"(?:哪些|多少|几个|覆盖|涵盖|所有).{0,12}(?:省份|省市|省级地区|各省|地区)"
+    r"|(?:哪些|多少|几个|所有|各个)(?:省份|省市|省级地区|地区).{0,16}(?:资料|信息|数据|覆盖|收录)"
+    r"|(?:覆盖|收录)(?:了)?(?:哪些|多少|几个)(?:省份|省市|省级地区|地区)"
+)
 ID = re.compile(r"\[(\d{1,2})\]")
 SUMMARY_HEADING = re.compile(r"^#{2,4}\s*本题要点\s*$", re.MULTILINE)
 FORMAL_SCORE = re.compile(
@@ -36,6 +51,44 @@ SYSTEM = """你是因空制宜低空经济决策助手。用中文自然回答�
 
 def is_greeting(question):
     return question.strip(" ！!。？?，,").lower() in GREETINGS
+
+
+def statistics_source(region, text):
+    return {
+        "id": f"population-2024-{region}", "region": region,
+        "title": STATS_TITLE, "locator": f"{STATS_YEAR} 年 · {region}",
+        "url": STATS_URL, "text": text,
+    }
+
+
+def catalog_response(question, has_attachment=False):
+    if not CATALOG_QUERY.search(question):
+        return None
+    # Asking for the catalog is independent of the regions in earlier questions.
+    policy_regions = "、".join(POLICY_REGIONS)
+    overview = statistics_source("全国", f"{STATS_YEAR} 年各地区年末人口和城镇人口占比。")
+    sources = [dict(row, number=i) for i, row in enumerate([*PUBLIC_SOURCES, overview], 1)]
+    lines = [f"**地方低空政策与场景资料**覆盖 {len(POLICY_REGIONS)} 个省级地区。"]
+    for region in POLICY_REGIONS:
+        refs = "".join(f"[{row['number']}]" for row in sources if row["region"] == region)
+        lines.append(f"- {region} {refs}")
+    lines.extend([
+        "",
+        "另有全国通用航空装备政策 [1]。",
+        "",
+        f"**基础统计**覆盖 {len(REGIONS)} 个省级地区，提供 {STATS_YEAR} 年人口和城镇人口占比 "
+        f"[{len(sources)}]。",
+        "",
+        "、".join(REGIONS) + "。",
+    ])
+    if has_attachment:
+        lines.extend(["", "当前会话上传的 PDF 单独列在左侧「我的资料」。"])
+    return {
+        "question": question, "regions": (), "sources": sources, "cited": sources,
+        "result": {"status": "CATALOG", "answer": "\n".join(lines),
+                   "summary": f"地方低空资料覆盖{policy_regions}。基础统计覆盖 {len(REGIONS)} 个省级地区。"},
+        "uses_pdf": False,
+    }
 
 
 def read_pdf(data, name):
@@ -75,6 +128,12 @@ def select_evidence(question, prior_regions=(), pages=(), attachment_name=""):
     if public or regions or DOMAIN.search(question):
         public = [PUBLIC_SOURCES[0], *public]
     selected = [dict(row) for row in public]
+    if STATISTICS_QUERY.search(question):
+        for region in regions:
+            population, urban_share = REGIONS[region]
+            selected.append(statistics_source(
+                region, f"{STATS_YEAR} 年末人口 {population} 万人，城镇人口占比 {urban_share:.2f}%。"
+            ))
     if pages:
         # Rank pages on short search terms from the question, with page order as a tie breaker.
         terms = re.findall(r"[A-Za-z0-9]{2,}|[\u4e00-\u9fff]{2,}", question.lower())
@@ -106,8 +165,7 @@ def answer(key, question, turns, pages=(), attachment_name=""):
     ]
     payload = {
         "question": question, "regions": regions, "history": history,
-        "regions_without_public_evidence": [name for name in regions
-                                            if not any(row["region"] == name for row in sources)],
+        "regions_without_local_policy": [name for name in regions if name not in POLICY_REGIONS],
         "evidence": [{k: row[k] for k in ("number", "title", "locator", "region", "text")}
                      for row in sources],
     }
@@ -141,7 +199,7 @@ def conversation_summary(turns):
         if is_greeting(turn["question"]):
             continue
         outcome = turn["result"]
-        if outcome["status"] != "CONNECTED":
+        if outcome["status"] not in {"CONNECTED", "CATALOG"}:
             pending.append(turn["question"])
             continue
         local_numbers = {}

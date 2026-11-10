@@ -6,7 +6,7 @@ from zipfile import ZipFile
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
-from judge_workbench import answer, conversation_summary, read_pdf, report, select_evidence
+from judge_analysis import answer, catalog_response, conversation_summary, read_pdf, report, select_evidence
 from report_docx import build as word_report
 
 
@@ -31,7 +31,7 @@ def sample_pdf():
 
 class JudgeTests(unittest.TestCase):
     def test_greeting_uses_model_without_evidence(self):
-        with patch("judge_workbench.judge_answer", return_value={"status": "CONNECTED", "answer": "你好！"}) as model:
+        with patch("judge_analysis.judge_answer", return_value={"status": "CONNECTED", "answer": "你好！"}) as model:
             result = answer("test", "你好", [])
         self.assertEqual(model.call_args.args[2]["evidence"], [])
         self.assertEqual(result["result"]["answer"], "你好！")
@@ -48,7 +48,7 @@ class JudgeTests(unittest.TestCase):
     def test_pdf_location_and_report_export(self):
         pages = read_pdf(sample_pdf(), "synthetic.pdf")
         self.assertIn("Project Willow", pages[0][1])
-        with patch("judge_workbench.judge_answer", return_value={
+        with patch("judge_analysis.judge_answer", return_value={
             "status": "CONNECTED", "answer": "附件要求两个备用降落点。[1]"
         }) as model:
             result = answer("test", "Project Willow 有什么要求？", [], pages, "synthetic.pdf")
@@ -61,7 +61,7 @@ class JudgeTests(unittest.TestCase):
             self.assertIn("synthetic.pdf", doc.read("word/document.xml").decode())
 
     def test_pdf_isolation_and_model_error(self):
-        with patch("judge_workbench.judge_answer", return_value={"status": "HTTP_ERROR", "http_code": 401}) as model:
+        with patch("judge_analysis.judge_answer", return_value={"status": "HTTP_ERROR", "http_code": 401}) as model:
             result = answer("test", "附件呢？", [{
                 "question": "上次有附件", "regions": (), "uses_pdf": True,
                 "result": {"status": "CONNECTED", "answer": "私有附件内容"},
@@ -71,7 +71,7 @@ class JudgeTests(unittest.TestCase):
 
     def test_invalid_source_or_formal_score_is_not_shown(self):
         for text in ("参考政策[9]", "S=0.88。[1]", "承载得分为 90。[1]", "省级政策结论。"):
-            with self.subTest(text=text), patch("judge_workbench.judge_answer", return_value={
+            with self.subTest(text=text), patch("judge_analysis.judge_answer", return_value={
                 "status": "CONNECTED", "answer": text,
             }):
                 result = answer("test", "黑龙江低空政策", [])
@@ -90,7 +90,7 @@ class JudgeTests(unittest.TestCase):
             {"status": "HTTP_ERROR", "http_code": 503},
         ]
         turns = []
-        with patch("judge_workbench.judge_answer", side_effect=replies):
+        with patch("judge_analysis.judge_answer", side_effect=replies):
             for question in ["你好", "黑龙江植保有什么依据？", "福建文旅有什么案例？", "后续怎么落地？"]:
                 turns.append(answer("test", question, turns))
         findings, pending, sources = conversation_summary(turns)
@@ -103,6 +103,26 @@ class JudgeTests(unittest.TestCase):
         for item in ["黑龙江植保", "福建文旅", "后续怎么落地", "来源与定位"]:
             self.assertIn(item, content)
         self.assertNotIn("您好", content)
+
+    def test_catalog_lists_public_provinces_and_separates_uploads(self):
+        result = catalog_response("整个数据资料库你有哪些省份的信息", has_attachment=True)
+        self.assertEqual(result["result"]["status"], "CATALOG")
+        self.assertEqual(
+            {s["region"] for s in result["cited"]},
+            {"全国", "黑龙江", "福建", "安徽", "云南", "吉林", "广东", "四川"},
+        )
+        self.assertIn("31 个省级地区", result["result"]["answer"])
+        self.assertIn("PDF 单独列", result["result"]["answer"])
+        self.assertIn("黑龙江", conversation_summary([result])[0][0]["note"])
+        self.assertIsNone(catalog_response("黑龙江有哪些低空经济政策？"))
+        self.assertIsNone(catalog_response("根据公开资料分析上海地区的低空政策"))
+
+    def test_region_statistics_are_separate_from_policy_evidence(self):
+        _, sources = select_evidence("上海的人口和城镇化率")
+        self.assertIn("2480 万人", sources[-1]["text"])
+        self.assertEqual(sources[-1]["region"], "上海")
+        _, sources = select_evidence("四川有哪些低空经济政策")
+        self.assertTrue(any(row["region"] == "四川" for row in sources))
 
 
 if __name__ == "__main__":

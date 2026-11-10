@@ -9,7 +9,9 @@ from uuid import uuid4
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
-from judge_workbench import MAX_QUESTION, PUBLIC_SOURCES, answer, conversation_summary, read_pdf, report
+from judge_analysis import (
+    MAX_QUESTION, PUBLIC_SOURCES, answer, catalog_response, conversation_summary, read_pdf, report,
+)
 from report_docx import build as word_report
 
 LOGO = Path(__file__).parent / "assets" / "yinkong-logo.jpg"
@@ -137,7 +139,7 @@ def render_sources(rows):
 
 def render_reply(turn):
     outcome = turn["result"]
-    if outcome["status"] == "CONNECTED":
+    if outcome["status"] in {"CONNECTED", "CATALOG"}:
         st.markdown(outcome["answer"])
     else:
         st.error(ERRORS.get(outcome["status"], "本次未能完成回答。"))
@@ -148,6 +150,9 @@ def render_reply(turn):
 
 def submit(key, chat, prompt, allow_pdf):
     pdf = chat["pdf"]
+    catalog = catalog_response(prompt, has_attachment=bool(pdf and pdf["pages"]))
+    if catalog is not None:
+        return catalog
     if pdf and pdf["pages"] and not allow_pdf:
         # General questions may proceed without the attachment. Requests that explicitly reference it
         # should wait for the user's permission instead of pretending it was read.
