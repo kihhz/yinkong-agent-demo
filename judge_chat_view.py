@@ -1,14 +1,13 @@
 """Presentation of a single public-analysis turn and its exports."""
 import re
 
-from judge_public_evidence import DOMAIN, is_greeting
+from judge_catalog import DOMAIN, is_greeting
 
 FORMAL = re.compile(r"数值|指标|评分|打分|承载|测度|排名|N/D/S/G/T", re.I)
 FOLLOW_UP = re.compile(r"刚才|上文|前面|上一个|进一步|接着|继续|上述|还有吗|再说说")
 DOCUMENT = re.compile(r"这份|这篇|原文|第.{1,4}[页条章]|文件.{0,8}(说|提到|写)")
 ANALYSIS = re.compile(r"分析|优先|建议|怎么发展|如何落|怎么落|对比|比较|试点|适合")
 HEADINGS = re.compile(r"^#{1,6}\s*(结论|依据|建议先做什么|建议|仍需核实|仍需补齐)\s*[:：]?\s*$", re.M)
-LIMITS = ("合格承载数据未齐备。", "没有已确认的可计任务。", "限定任务范围尚未确认。")
 CAPABILITIES = "你好！我可以帮你查阅低空经济公开资料，分析地区条件、核对项目进展，并列出下一步要核实的材料。"
 
 
@@ -50,7 +49,7 @@ def make_outcome(turn, route):
     if status == "CATALOG":
         steps.append("读取公开资料目录")
     elif not general:
-        steps.append("检索精选公开资料")
+        steps.append("检索公开资料库")
     if status in {"CONNECTED", "EVIDENCE_VALIDATION_FAILED"}:
         steps.append("请求华为云模型生成回答")
     if status == "CONNECTED" and sources:
@@ -59,7 +58,6 @@ def make_outcome(turn, route):
         not any(row["region"] == region for row in turn["sources"]) for region in regions
     ))
     unavailable = status not in {"CONNECTED", "CATALOG"}
-    numeric = not general and (route in {"综合分析", "结合前文"} or FORMAL.search(turn["question"]))
     body = result.get("answer", "")
     blocks = sections(body)
     summary = blocks.get("结论") or result.get("summary") or body
@@ -75,9 +73,9 @@ def make_outcome(turn, route):
             relevant = [row for row in turn["sources"] if row["region"] in regions]
             sources = (relevant + [row for row in turn["sources"] if row not in relevant])[:4]
             if not sources:
-                core = "当前精选资料未检出直接依据。"
+                core = "当前资料库没有找到直接依据。"
             elif no_local_evidence:
-                core = "当前精选资料未检出部分或全部目标地区的直接依据。"
+                core = "当前资料库缺少部分或全部目标地区的直接依据。"
             else:
                 core = "已找到以下公开资料，可据此开始核查。"
             body = core
@@ -87,12 +85,11 @@ def make_outcome(turn, route):
     if no_local_evidence and not unavailable:
         pending.insert(0, "部分或全部目标地区缺直接公开依据，需补查当地原文。")
     label = "证据不足" if unavailable or no_local_evidence or not sources else (
-        "定性分析" if numeric else "资料问答"
+        "定性分析" if route in {"综合分析", "结合前文"} else "资料问答"
     )
     return {"route": "一般对话" if general else route, "label": label, "steps": steps,
             "general": general, "body": body, "core": core, "sources": sources,
-            "suggestions": suggestions, "pending": pending, "needs_evidence": no_local_evidence,
-            "numeric": dict.fromkeys("NDSGT") if numeric else None}
+            "suggestions": suggestions, "pending": pending}
 
 
 def build_brief(question, outcome):
@@ -101,10 +98,6 @@ def build_brief(question, outcome):
     for title, key in (("建议先做什么", "suggestions"), ("仍需补齐", "pending")):
         if outcome[key]:
             lines += ["", f"## {title}", "", *(f"- {item}" for item in outcome[key])]
-    if outcome["numeric"] is not None:
-        lines += ["", "## 数值状态", "",
-                  *(f"- {field} 未计算" for field in outcome["numeric"]),
-                  "", *(f"- {item}" for item in LIMITS), "", "null 不等于 0。"]
     if outcome["sources"]:
         lines += ["", "## 公开依据", ""]
         for row in outcome["sources"]:

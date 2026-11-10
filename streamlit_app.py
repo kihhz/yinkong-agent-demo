@@ -8,8 +8,11 @@ from time import monotonic
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
-from judge_experience import LIMITS, build_brief, make_outcome, route_for
-from judge_public_evidence import MAX_QUESTION, PUBLIC_SOURCES, answer, catalog_response, conversation_summary
+from judge_chat_view import build_brief, make_outcome, route_for
+from judge_catalog import (
+    MAX_QUESTION, PUBLIC_SOURCES, REGIONS, STATS_URL, STATS_YEAR,
+    answer, catalog_response, conversation_summary,
+)
 from report_docx import build as word_report
 
 LOGO = Path(__file__).parent / "assets" / "yinkong-logo.jpg"
@@ -18,14 +21,6 @@ EXAMPLES = (
     "现有资料能否说明呼玛短途运输已经运营？",
     "黑龙江农林植保政策如何落到具体任务？",
 )
-FEATURED = (
-    ("国家通用航空装备实施方案", "national-2024", "工业和信息化部等四部门 · 2024"),
-    ("黑龙江低空经济发展实施方案", "hlj-policy", "黑龙江省人民政府办公厅 · 2024"),
-    ("黑龙江 2024 项目与场景清单", "hlj-zhaodong", "黑龙江省人民政府公开页附件 2 · 2024"),
-    ("广州低空应用场景需求", "gz-demand", "广州市交通运输局 · 2026"),
-    ("黑龙江 2024 统计公报", "hlj-statistics", "黑龙江省统计局、国家统计局黑龙江调查总队 · 2025"),
-)
-SOURCE_INDEX = {row["id"]: row for row in PUBLIC_SOURCES}
 MODEL_FAILURES = {
     "UNAVAILABLE": "连接中断或响应超时。",
     "HTTP_ERROR": "模型服务请求失败。",
@@ -43,40 +38,74 @@ CSS = """
 [data-testid="stSidebar"] {background:#f5f7f5; border-right:1px solid #dfe7e1; width:272px;}
 [data-testid="stSidebar"] [data-testid="stSidebarContent"] {padding-top:0;}
 [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {padding:1.1rem 1rem 1.4rem;}
-[data-testid="stMainBlockContainer"] {padding-top:3.7rem; padding-bottom:2.5rem;}
+[data-testid="stMain"]:has(.st-key-viewport) {overflow:hidden;}
+[data-testid="stMainBlockContainer"] {padding:3.3rem clamp(.85rem, 2vw, 2.4rem) .6rem;}
+.stElementContainer:has(.judge-style-anchor) {display:none;}
+[data-testid="stLayoutWrapper"]:has(> .st-key-viewport) {height:calc(100dvh - 3.9rem); flex:none;}
+.st-key-viewport {height:100%; min-height:0; gap:.65rem;}
+.st-key-viewport [data-testid="stHeading"] h1 {padding:0;}
+.st-key-page-title {flex:none; gap:.15rem;}
+.st-key-viewport > [data-testid="stLayoutWrapper"]:has(> .st-key-workbench),
+.st-key-workbench > [data-testid="stLayoutWrapper"],
+.st-key-chat-shell > [data-testid="stLayoutWrapper"]:has(> .st-key-dialogue) {
+    flex:1 1 0; min-height:0;
+}
+.st-key-workbench {height:100%; min-height:0;}
+.st-key-workbench [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-chat-shell) {
+    height:100%; min-height:0; align-items:stretch; gap:clamp(.75rem, 1.6vw, 1.5rem);
+}
+.st-key-workbench [data-testid="stColumn"]:has(.st-key-chat-shell),
+.st-key-workbench [data-testid="stColumn"]:has(.st-key-results-card) {height:100%; min-height:0; min-width:0;}
+.st-key-workbench [data-testid="stColumn"] > [data-testid="stVerticalBlock"],
+.st-key-workbench [data-testid="stColumn"] [data-testid="stLayoutWrapper"]:has(> :is(.st-key-chat-shell, .st-key-results-card)) {
+    height:100%; min-height:0; flex:1 1 0;
+}
+.st-key-chat-shell {height:100%; min-height:0; gap:.5rem;}
+.st-key-chat-shell .st-key-dialogue {height:100%; min-height:0; max-height:none; overflow:auto;
+    overscroll-behavior:contain; padding:.35rem clamp(.1rem, 2vw, 2rem) .65rem; scrollbar-width:thin;}
+.st-key-chat-shell > [data-testid="stLayoutWrapper"]:has(> .st-key-composer) {flex:none;}
+.st-key-composer {background:#f4f6f2; padding:.2rem clamp(.1rem, 2vw, 2rem) .2rem;}
+.st-key-composer [data-testid="stChatInput"] {border-radius:1.2rem; background:#fff; box-shadow:0 2px 14px #173e3514;}
+.st-key-mobile-results {display:none;}
 .stMarkdown p, .stMarkdown li {font-size:.94rem; line-height:1.75; overflow-wrap:anywhere;}
 [data-testid="stMarkdownContainer"] h1 {font-size:2rem; line-height:1.2; color:#173e35;}
 [data-testid="stMarkdownContainer"] h2 {font-size:1.45rem; color:#173e35;}
 [data-testid="stMarkdownContainer"] h3 {font-size:1.15rem; color:#173e35;}
-.judge-eyebrow {font-size:.8rem; color:#687c71; font-weight:650; letter-spacing:.09em;}
 .judge-chip {display:inline-block; padding:.2rem .64rem; margin-bottom:.25rem; border-radius:999px;
     background:#e7f1e9; color:#245c48; font-weight:650; font-size:.78rem;}
 .judge-chip-warn {background:#f8ebd7; color:#775018;}
 .judge-history {white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:.3rem .6rem;
     font-size:.9rem; color:#50695e;}
 .judge-history-current {background:#e7f1e9; color:#173e35; border-radius:.55rem; font-weight:650;}
-.st-key-brand-logo img, .st-key-welcome-logo img {border-radius:.75rem;}
-.st-key-workbench > div > [data-testid="stHorizontalBlock"] {align-items:flex-start;}
-[data-testid="stChatMessage"] {background:white; border:1px solid #dfe7e1; border-radius:.8rem;
-    padding:.7rem .85rem;}
+.st-key-brand-logo img {border-radius:.75rem;}
+.st-key-dialogue [data-testid="stChatMessage"] {background:transparent; padding:.6rem .2rem; max-width:100%;}
+.st-key-dialogue [data-testid="stChatMessageContent"] {min-width:0;}
 .st-key-dialogue [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
-    align-self:flex-end; max-width:90%; width:fit-content; background:#e5f0e9; flex-direction:row-reverse;
+    align-self:flex-end; max-width:84%; width:fit-content; margin-left:auto; background:#e5f0e9;
+    padding:.65rem .95rem; border-radius:1.2rem 1.2rem .35rem 1.2rem;
 }
+.st-key-dialogue [data-testid="stChatMessageAvatarUser"] {display:none;}
+.st-key-dialogue [data-testid="stText"] {white-space:pre-wrap; overflow-wrap:anywhere;}
 .st-key-results-card, .st-key-welcome {background:#fff; border:1px solid #dfe7e1;
     border-radius:.85rem; padding:1rem;}
+.st-key-workbench .st-key-results-card {height:100%; max-height:none; min-height:0; overflow:auto;
+    overscroll-behavior:contain; scrollbar-width:thin;}
 .st-key-example-questions button {background:#fff; border-color:#dfe7e1; text-align:left;}
 .st-key-example-questions button:hover {border-color:#245c48; color:#173e35;}
 .st-key-example-questions button p {width:100%; text-align:left;}
 [data-testid="stExpander"] details, [data-testid="stForm"] {border-color:#dfe7e1; border-radius:.75rem;}
-@media (max-width:850px) {
-    .st-key-workbench > div > [data-testid="stHorizontalBlock"] {flex-direction:column; gap:1rem;}
-    .st-key-workbench > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-        width:100%; min-width:0; flex:1 1 100%;
+@media (max-width:930px) {
+    .st-key-mobile-results {display:block;}
+    .st-key-workbench [data-testid="stColumn"]:has(.st-key-chat-shell),
+    .st-key-workbench [data-testid="stColumn"]:has(.st-key-results-card) {width:100%; flex:1 1 100%;}
+    .st-key-viewport:not(:has(.st-key-mobile-results input:checked)) [data-testid="stColumn"]:has(.st-key-results-card),
+    .st-key-viewport:has(.st-key-mobile-results input:checked) [data-testid="stColumn"]:has(.st-key-chat-shell) {
+        display:none;
     }
-    [data-testid="stMainBlockContainer"] {padding:3.6rem .9rem 1.25rem;}
     [data-testid="stMarkdownContainer"] h1 {font-size:1.7rem;}
 }
 </style>
+<span class="judge-style-anchor" hidden></span>
 """
 
 
@@ -113,6 +142,7 @@ def model_key():
 def new_chat():
     st.session_state["judge_turns"] = []
     st.session_state[DRAFT] = ""
+    st.session_state["show-results"] = False
     st.session_state.pop("judge_pending_question", None)
 
 
@@ -121,9 +151,8 @@ def prefill(question):
 
 
 def queue_question():
-    if question := st.session_state[DRAFT].strip():
+    if question := (st.session_state[DRAFT] or "").strip():
         st.session_state["judge_pending_question"] = question
-        st.session_state[DRAFT] = ""
 
 
 def badge(label, warning=False):
@@ -148,21 +177,19 @@ def sidebar(key, turns):
             st.markdown(f'<div class="judge-history{style}" title="{question}">{question}</div>',
                         unsafe_allow_html=True)
         st.caption("仅保存在当前浏览器会话。")
-        st.markdown("### 精选资料库")
-        for short, source_id, metadata in FEATURED:
-            row = SOURCE_INDEX[source_id]
-            with st.expander(short):
-                title = ("2024年黑龙江省低空经济发展重点项目和应用场景清单"
-                         if source_id == "hlj-zhaodong" else row["title"])
-                st.markdown(f"**{title}**")
-                st.caption(metadata)
-                st.caption("本体验版未随网页提供本地 PDF。")
-                st.link_button("查看原文", row["url"])
+        st.markdown("### 资料库")
+        for region in dict.fromkeys(row["region"] for row in PUBLIC_SOURCES):
+            with st.expander(region):
+                for row in PUBLIC_SOURCES:
+                    if row["region"] == region:
+                        st.markdown(f"- [{row['title']}]({row['url']})")
+        with st.expander(f"{len(REGIONS)} 个省级地区基础统计"):
+            st.caption(f"{STATS_YEAR} 年人口和城镇化，可直接在对话中按省查询。")
+            st.link_button("查看统计来源", STATS_URL)
         st.markdown("### 模型状态")
         badge("华为云模型已配置" if key else "华为云模型未配置", warning=not key)
         if not key:
             st.caption("当前使用确定性资料核查。")
-        st.caption("体验范围：公开资料问答与定性分析。文件上传、OCR、正式数值评价和专业审核暂未开放。")
 
 
 def render_sources(rows):
@@ -230,13 +257,13 @@ def render_session_summary(turns):
 
 
 def results_panel(turn):
-    with st.container(key="results-card"):
+    with st.container(key="results-card", height=500, border=False, autoscroll=False):
         st.markdown("## 对话成果")
         if turn is None or turn["view"]["general"]:
             st.caption("提出具体问题后，这里会显示当前结论、依据和简报。")
             return
         view = turn["view"]
-        conclusion, sources, status = st.tabs(["结论", "依据", "状态"])
+        conclusion, sources, report_tab = st.tabs(["结论", "依据", "简报"])
         with conclusion:
             badge(view["label"], warning=view["label"] == "证据不足")
             if view["core"]:
@@ -248,22 +275,14 @@ def results_panel(turn):
                         st.markdown(f"- {item}")
         with sources:
             render_sources(view["sources"])
-        with status:
-            if view["numeric"] is not None:
-                badge("数值未计算", warning=True)
-                st.markdown("\n".join(f"- **{field}** 未计算" for field in view["numeric"]))
-                st.markdown("\n".join(f"- {limit}" for limit in LIMITS))
-                st.caption("null 不等于 0。")
-            else:
-                st.caption("本题按公开资料问答处理。")
-        if brief := view.get("brief"):
-            with st.expander("报告预览"):
+        with report_tab:
+            if brief := view.get("brief"):
+                st.download_button("下载 Markdown", brief, "因空制宜_低空经济分析简报.md", "text/markdown",
+                                   key="download-md", on_click="ignore")
+                st.download_button("下载 Word", word_report(brief), "因空制宜_低空经济分析简报.docx",
+                                   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                   key="download-word", on_click="ignore")
                 st.markdown(brief)
-            st.download_button("下载 Markdown", brief, "因空制宜_低空经济分析简报.md", "text/markdown",
-                               key="download-md", on_click="ignore")
-            st.download_button("下载 Word", word_report(brief), "因空制宜_低空经济分析简报.docx",
-                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                               key="download-word", on_click="ignore")
 
 
 def main():
@@ -272,43 +291,51 @@ def main():
     st.markdown(CSS, unsafe_allow_html=True)
     turns = st.session_state.setdefault("judge_turns", [])
     key = model_key()
-    st.markdown('<div class="judge-eyebrow">评委体验 · 公开资料</div>', unsafe_allow_html=True)
-    st.markdown("# 因空制宜 Agent")
-    with st.container(key="workbench"):
-        center, right = st.columns([2.4, 1.3], gap="large")
-        with center:
-            if prompt := st.session_state.pop("judge_pending_question", ""):
-                message = "正在检索资料并请求华为云模型…" if key else "正在核查精选公开资料…"
-                with st.spinner(message):
-                    submit(key, turns, prompt)
-            if not turns:
-                with st.container(key="welcome"):
-                    with st.container(key="welcome-logo"):
-                        st.image(str(LOGO), width=200)
-                    st.markdown("## 从业务问题到可核查建议")
-                    st.markdown("说说你想判断的地区、场景或材料问题。我们会查阅精选公开资料，整理可以确认的依据和仍需核实的条件。")
-            else:
-                st.markdown("## 对话")
-            with st.container(key="dialogue"):
-                for turn in turns:
-                    with st.chat_message("user"):
-                        st.text(turn["question"])
-                    with st.chat_message("assistant"):
-                        render_reply(turn)
-            render_session_summary(turns)
-            with st.container(key="example-questions"):
-                st.caption("试试这些问题")
-                for i, sample in enumerate(EXAMPLES):
-                    st.button(sample, key=f"example-{i}", width="stretch", on_click=prefill, args=(sample,))
-            with st.form("question-form", border=False):
-                st.text_input(
-                    "问题", key=DRAFT, label_visibility="collapsed", max_chars=MAX_QUESTION,
-                    placeholder="例如：黑龙江哪些低空应用场景值得优先开展受控试点？",
-                )
-                st.form_submit_button("发送", type="primary", on_click=queue_question)
-        with right:
-            results_panel(turns[-1] if turns else None)
+    with st.container(key="viewport"):
+        with st.container(key="page-title"):
+            st.markdown("# 因空制宜 Agent")
+            with st.container(key="mobile-results"):
+                st.toggle("查看对话成果", key="show-results")
+        with st.container(key="workbench"):
+            center, right = st.columns([2.4, 1.3])
+            with center, st.container(key="chat-shell"):
+                with st.container(key="dialogue", height=500, border=False, autoscroll=True):
+                    if not turns and not st.session_state.get("judge_pending_question"):
+                        with st.container(key="welcome"):
+                            st.markdown("## 从业务问题到可核查建议")
+                            st.markdown("直接询问地区、应用场景或政策。回答会附上所用资料。")
+                        with st.container(key="example-questions"):
+                            st.caption("试试这些问题")
+                            for i, sample in enumerate(EXAMPLES):
+                                st.button(sample, key=f"example-{i}", width="stretch",
+                                          on_click=prefill, args=(sample,))
+                    for turn in turns:
+                        render_turn(turn)
+                    if prompt := st.session_state.pop("judge_pending_question", ""):
+                        with st.chat_message("user"):
+                            st.text(prompt)
+                        with st.chat_message("assistant"):
+                            with st.spinner("正在查找资料并整理回答…"):
+                                submit(key, turns, prompt)
+                            render_reply(turns[-1])
+                    render_session_summary(turns)
+                    if turns:
+                        with st.expander("示例问题"):
+                            for i, sample in enumerate(EXAMPLES):
+                                st.button(sample, key=f"example-{i}", on_click=prefill, args=(sample,))
+                with st.container(key="composer"):
+                    st.chat_input("输入问题，按 Enter 发送", key=DRAFT, max_chars=MAX_QUESTION,
+                                  on_submit=queue_question)
+            with right:
+                results_panel(turns[-1] if turns else None)
     sidebar(key, turns)
+
+
+def render_turn(turn):
+    with st.chat_message("user"):
+        st.text(turn["question"])
+    with st.chat_message("assistant"):
+        render_reply(turn)
 
 
 if __name__ == "__main__":
